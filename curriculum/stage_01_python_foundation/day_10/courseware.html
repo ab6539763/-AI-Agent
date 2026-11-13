@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 10 | 智枢企业级智能体平台 · 模块化包管理与自定义异常体系</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 2 周 · Day 10 | 版本 v0.1.0-day10</div>
+      <h1>模块化包管理与异常体系：让智枢平台不再“裸奔”</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》工程化加固 —— <code>zhishu_agent</code> 包规范、<code>requirements.txt</code> 依赖锁定与自定义异常树</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      各位同学好，欢迎来到 Day 10！昨天（Day 09）我们用继承和多态把 <code>OpenAIModel</code> 和 <code>QwenModel</code> 统一起来了。但今天测试团队反馈了两个线上隐患：第一，所有参数错误都抛内置 <code>ValueError</code>，运维告警根本分不清是“用户角色非法”还是“大模型接口 503 超时”；第二，团队协作缺少 <code>requirements.txt</code> 和虚拟环境规范。今天我们用 <strong>自定义异常继承树 + <code>try/except/else/finally</code> + 包模块化</strong> 为智枢平台穿上防弹衣！
+    </div>
+
+    <h2>一、上午：Python 模块、包（Package）与虚拟环境</h2>
+    <div class="card">
+      <p>在企业级项目中，我们绝不会把所有类都堆在一个 <code>app.py</code> 里，也不会把所有第三方库装到系统全局 Python 中：</p>
+      <table>
+        <thead>
+          <tr>
+            <th>工程概念</th>
+            <th>核心文件 / 命令</th>
+            <th>解决的团队痛点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>模块 (Module)</strong></td>
+            <td><code>exceptions.py</code> / <code>models.py</code></td>
+            <td>按职责拆分文件，避免千行大文件难以维护</td>
+          </tr>
+          <tr>
+            <td><strong>包 (Package)</strong></td>
+            <td><code>zhishu_agent/__init__.py</code></td>
+            <td>通过 <code>__all__</code> 统一对外暴露接口，隐藏内部细节</td>
+          </tr>
+          <tr>
+            <td><strong>虚拟环境 (venv)</strong></td>
+            <td><code>python -m venv .venv</code></td>
+            <td>项目间依赖完全隔离，防止版本冲突</td>
+          </tr>
+          <tr>
+            <td><strong>依赖清单</strong></td>
+            <td><code>pip install -r requirements.txt</code></td>
+            <td>保证开发、测试、生产环境包版本 100% 一致</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>二、下午：智枢平台自定义异常体系设计</h2>
+    <div class="card">
+      <p>所有业务异常都应继承自统一的平台基类 <code>ZhiShuError(Exception)</code>，这样上层调用方既能精确捕获特定错误，也能用基类做全局兜底：</p>
+      <div class="mermaid">
+        classDiagram
+          class Exception
+          class ZhiShuError {
+            +str message
+            +str error_code
+          }
+          class InvalidRoleError {
+            +object role
+            +tuple valid_roles
+          }
+          class ModelConfigError
+          class APIResponseError {
+            +int status_code
+          }
+          Exception <|-- ZhiShuError
+          ZhiShuError <|-- InvalidRoleError
+          ZhiShuError <|-- ModelConfigError
+          ZhiShuError <|-- APIResponseError
+      </div>
+      <pre><code># zhishu_agent/exceptions.py 核心片段
+class ZhiShuError(Exception):
+    def __init__(self, message: str, error_code: str = "ZHISHU_ERROR") -> None:
+        self.message = message
+        self.error_code = error_code
+        super().__init__(f"[{error_code}] {message}")
+
+class InvalidRoleError(ZhiShuError):
+    def __init__(self, role: object, valid_roles: tuple[str, ...]) -> None:
+        self.role = role
+        self.valid_roles = valid_roles
+        super().__init__(f"无效的消息角色: {role!r}，允许的角色为 {valid_roles}", "INVALID_ROLE")</code></pre>
+    </div>
+
+    <h2>三、下午实战：<code>try / except / else / finally</code> 四段式容错</h2>
+    <div class="card">
+      <p>很多同学只用过 <code>try / except</code>，但在企业级服务中，<code>else</code> 和 <code>finally</code> 同样关键：</p>
+      <ul>
+        <li><code>try</code>：只放<strong>可能出错的核心调用</strong>（尽量精简，避免掩盖无关异常）。</li>
+        <li><code>except</code>：按<strong>从子类到父类</strong>的顺序捕获异常，给出降级方案或告警。</li>
+        <li><code>else</code>：<strong>仅当 <code>try</code> 毫无异常时执行</strong>，适合放成功后的统计与后续处理。</li>
+        <li><code>finally</code>：<strong>无论成功与否必定执行</strong>，适合关闭连接、释放锁、记录审计日志。</li>
+      </ul>
+      <pre><code>try:
+    msg = ChatMessage(role=role, content=prompt)
+    reply = model.generate([msg])
+except InvalidRoleError as exc:
+    print(f"[拦截-角色异常] {exc}")
+except APIResponseError as exc:
+    print(f"[拦截-接口异常] {exc} (HTTP {exc.status_code})")
+except ZhiShuError as exc:
+    print(f"[拦截-通用平台异常] {exc}")
+else:
+    print(f"[成功-else分支] 推理完成，回复长度 {len(reply.content)}")
+finally:
+    print(f"[收尾-finally分支] 已记录调用审计日志 (model={model.model_name})")</code></pre>
+    </div>
+
+    <h2>四、随堂自测与课后作业提示</h2>
+    <div class="card">
+      <p>思考题：为什么在编写 <code>except</code> 分支时，必须把 <code>InvalidRoleError</code> 写在 <code>ZhiShuError</code> 之前？</p>
+      <details>
+        <summary>点击查看答案解析</summary>
+        <p>Python 的 <code>except</code> 按从上到下的顺序匹配异常类型。因为 <code>InvalidRoleError</code> 是 <code>ZhiShuError</code> 的子类，如果把 <code>except ZhiShuError:</code> 写在最前面，所有子类异常都会被它提前截胡，后面的细粒度分支将永远无法执行！</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>

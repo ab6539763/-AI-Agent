@@ -1,0 +1,7 @@
+# 智枢平台 Day 10 依赖清单 (v0.1.0-day10)
+# 安装命令: pip install -r requirements.txt
+# 导出锁定: pip freeze > requirements.txt
+
+pytest>=8.0.0
+httpx>=0.27.0
+pydantic>=2.7.0
