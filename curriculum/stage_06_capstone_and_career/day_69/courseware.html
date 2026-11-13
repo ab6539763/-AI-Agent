@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 69 | 智枢企业级智能体平台 · 一对一全真模拟面试日（技术面 + HR 面）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .bad { border-left: 4px solid var(--rose); }
+    .good { border-left: 4px solid var(--green); }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+    .interactive-box select, .interactive-box textarea {
+      width: 100%;
+      box-sizing: border-box;
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 6px 0 12px;
+      font-family: inherit;
+    }
+    .btn {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn:hover { opacity: 0.9; }
+    .score-pill {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-right: 8px;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">Stage 06 · Capstone &amp; Career · Day 69 · v1.0.0-day69</div>
+      <h1>一对一全真模拟面试日（技术面 + HR 面全闭环）</h1>
+      <p>星辰数科 · 智枢企业级智能体平台（ZhiShu-Agent） | Issue #069 · MR !069</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白：</strong> 欢迎来到 Day 69！在正式投递一线大厂前，我们需要把前面 68 天沉淀的 RAG 混合检索、HITL 人机协同审批、FastAPI SSE 流式网关与压测数据，放进真实的一对一面试高压环境中检验。今天 Tech Lead 张工（技术面）与 PM/HRBP 林晓（HR 面）联合上线 <code>MockInterviewEngine</code>，带你走完从「自我介绍」到「7 天改进清单」的完整闭环！
+    </div>
+
+    <h2>1. 团队分工与全真面试四轮流程</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>轮次</th>
+            <th>环节名称</th>
+            <th>面试官</th>
+            <th>考察重点与权重</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Round 1</td>
+            <td>自我介绍</td>
+            <td>Tech Lead 张工</td>
+            <td>表达清晰度 (35%) + 技术深度 (30%) + STAR (20%) + 担当 (15%)</td>
+          </tr>
+          <tr>
+            <td>Round 2</td>
+            <td>项目深挖</td>
+            <td>Tech Lead 张工</td>
+            <td>技术深度 (45%) + STAR (20%) + 清晰度 (20%) + 担当 (15%)</td>
+          </tr>
+          <tr>
+            <td>Round 3</td>
+            <td>场景手撕/架构</td>
+            <td>Tech Lead 张工</td>
+            <td>技术深度 (45%) + 清晰度 (25%) + STAR (15%) + 担当 (15%)</td>
+          </tr>
+          <tr>
+            <td>Round 4</td>
+            <td>行为面试 HR 面</td>
+            <td>HRBP / PM 林晓</td>
+            <td>诚实担当 (35%) + STAR (35%) + 清晰度 (20%) + 技术深度 (10%)</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="color: var(--muted); font-size: 14px;">
+        协同保障：全栈工程师 <strong>陈默</strong> 负责引擎实现与自测，QA <strong>李婷</strong> 负责 5 组边界用例回归，DevOps <strong>赵磊</strong> 负责 <code>verify_day.py</code> 自动化流水线验收。
+      </p>
+    </div>
+
+    <h2>2. 系统架构与评分决策流水线</h2>
+    <div class="mermaid">
+flowchart LR
+    R["4轮结构化问答<br/>(自我介绍→项目深挖→架构→HR)"] --> EV["evaluate_response()<br/>四维量化打分"]
+    EV --> W["技术面 70% + HR面 30%<br/>加权汇总"]
+    W --> DEC{"录用决策阈值"}
+    DEC -->|">=85 / 82 / 80"| SH["Strong-Hire"]
+    DEC -->|">=75 / 72 / 70"| OF["Offer"]
+    DEC -->|">=60 / 58 / 55"| HI["Hire"]
+    DEC -->|"<60 或多项空答"| NH["No-Hire"]
+    W --> CL["动态定位短板维度<br/>生成 7 天改进清单"]
+    </div>
+
+    <h2>3. 高分回答 vs 踩坑回答对比</h2>
+    <div class="grid-2">
+      <div class="card bad">
+        <h3>❌ 踩坑回答（易触发 No-Hire）</h3>
+        <p>“我参与了公司智能体开发，用了大模型和向量库，效果不错。线上出 bug 主要是测试没测出来，我写代码一般不犯错。”</p>
+        <p style="color: var(--rose); font-size: 14px;">诊断：无量化指标、无技术选型权衡、使用推诿/虚浮表述，<code>honesty_ownership</code> 与 <code>technical_depth</code> 双双失血。</p>
+      </div>
+      <div class="card good">
+        <h3>✅ 高分回答（冲击 Strong-Hire）</h3>
+        <p>“首先，我主导了智枢平台 RAG 与 HITL 网关重构。针对专有名词漏召回痛点，我设计 BM25+FAISS+RRF 融合与 Cross-Encoder Rerank，将 Top-5 召回率从 71% 提升至 92%，P95 延迟 165ms。同时我反思单机 SQLite 在多实例下存在锁边界，已规划演进至 Redis。”</p>
+        <p style="color: var(--green); font-size: 14px;">亮点：分点清晰、技术词与量化指标扎实、STAR 闭环完整且坦诚说明架构边界。</p>
+      </div>
+    </div>
+
+    <h2>4. 交互式模拟面试自测台</h2>
+    <div class="card interactive-box">
+      <label for="roundSelect"><strong>选择模拟轮次：</strong></label>
+      <select id="roundSelect">
+        <option value="tech">Round 2：项目深挖（技术面 · Tech Lead 张工）</option>
+        <option value="hr">Round 4：行为面试 HR 面（HRBP / PM 林晓）</option>
+      </select>
+      <label for="answerInput"><strong>输入你的回答草稿：</strong></label>
+      <textarea id="answerInput" rows="4" placeholder="尝试使用 首先/其次/最后 + STAR 结构 + 量化指标 + 我主导/复盘..."></textarea>
+      <button class="btn" onclick="runQuickEval()">立即四维打分</button>
+      <div id="evalOutput" style="margin-top: 14px;"></div>
+    </div>
+
+    <h2>5. 随堂自测与复盘要点</h2>
+    <details>
+      <summary>点击查看：为什么技术面与 HR 面不能共用同一套权重？</summary>
+      <p>技术面关注架构选型深度、量化收益与边界推演（<code>technical_depth</code> 权重 45%）；HR 面则重点考察冲突处理、失败复盘与主人翁精神（<code>honesty_ownership</code> 与 <code>star_structure</code> 各占 35%）。分开加权才能避免“技术强但甩锅推诿”的候选人误拿 Offer。</p>
+    </details>
+  </div>
+
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+
+    function runQuickEval() {
+      const roundType = document.getElementById("roundSelect").value;
+      const text = document.getElementById("answerInput").value.trim();
+      const out = document.getElementById("evalOutput");
+      if (!text) {
+        out.innerHTML = '<span style="color: var(--rose);">⚠️ 空回答：所有维度记 0 分，请至少输入结构化要点。</span>';
+        return;
+      }
+      const lower = text.toLowerCase();
+      const connectors = ["首先", "其次", "最后", "因此", "第一", "第二"].filter(k => lower.includes(k)).length;
+      const techKw = ["rag", "bm25", "rrf", "rerank", "hitl", "fastapi", "sse", "sqlite", "pytest", "p95", "recall", "幂等", "熔断", "降级"].filter(k => lower.includes(k)).length;
+      const hasMetric = /\d+(\.\d+)?\s*(%|ms|s|倍|qps)/i.test(text);
+      const starHits = ["痛点", "背景", "当时", "职责", "负责", "设计", "通过", "最终", "提升", "复盘"].filter(k => lower.includes(k)).length;
+      const ownPos = ["我主导", "我负责", "我设计", "复盘", "主动", "承担", "坦诚", "边界"].filter(k => lower.includes(k)).length;
+      const ownNeg = ["都是别人", "测试没测出来", "从来不犯错"].filter(k => lower.includes(k)).length;
+
+      const clarity = Math.min(100, 40 + (text.length >= 80 ? 25 : 10) + connectors * 12);
+      const tech = Math.min(100, (roundType === "tech" ? 25 : 40) + techKw * 12 + (hasMetric ? 20 : 0));
+      const star = Math.min(100, 25 + starHits * 15);
+      const honesty = Math.max(0, Math.min(100, 45 + ownPos * 14 - ownNeg * 25));
+
+      const total = roundType === "tech"
+        ? (clarity * 0.20 + tech * 0.45 + star * 0.20 + honesty * 0.15)
+        : (clarity * 0.20 + tech * 0.10 + star * 0.35 + honesty * 0.35);
+
+      out.innerHTML = `
+        <div>
+          <span class="score-pill">综合得分：${total.toFixed(1)}</span>
+          <span class="score-pill">清晰度：${clarity}</span>
+          <span class="score-pill">技术深度：${tech}</span>
+          <span class="score-pill">STAR：${star}</span>
+          <span class="score-pill">诚实担当：${honesty}</span>
+        </div>
+      `;
+    }
+  </script>
+</body>
+</html>
