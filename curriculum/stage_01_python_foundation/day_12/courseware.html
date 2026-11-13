@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 12 | 智枢企业级智能体平台 · HTTP 请求与大模型 API 客户端</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 3 周 · Day 12 (Key Day!) | 版本 v0.1.0-day12</div>
+      <h1>HTTP 请求与大模型 API 客户端：打通云端推理最后一公里</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》核心通信层 —— 基于 httpx 封装 OpenAI/DeepSeek 兼容客户端与 MockTransport 离线单测体系</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      各位同学，今天是第一阶段的<strong>关键一天（Key Day）</strong>！前 11 天我们打好了 Python 基础、异常体系与面向对象模型抽象。今天，工程师 <strong>陈默</strong> 要亲手写出智枢平台的<strong>真实大模型 HTTP 通信引擎</strong>。无论 OpenAI、DeepSeek 还是通义千问，本质上都是向 <code>/v1/chat/completions</code> 发送一条带有 <code>Authorization: Bearer ...</code> 的 HTTP POST 请求。更重要的是，我们会引入 <code>httpx.MockTransport</code> 依赖注入，让所有 HTTP 客户端测试都能在<strong>断网、零 Token 消耗</strong>的环境下 100% 确定性跑通！
+    </div>
+
+    <h2>一、上午：HTTP POST 协议与 OpenAI/DeepSeek 接口规范</h2>
+    <div class="card">
+      <p>调用任何兼容 OpenAI 协议的大模型 API，都由四个核心要素组成：<strong>Method + URL、Headers、JSON Payload、Status Code 与 Response JSON</strong>。</p>
+      <div class="mermaid">
+        sequenceDiagram
+          autonumber
+          participant Client as 智枢客户端 (LLMClient)
+          participant HTTP as HTTP POST /v1/chat/completions
+          participant API as 大模型 API 网关
+          participant Parser as 响应解析与异常映射器
+
+          Client->>Client: build_headers() 构造 Bearer Token
+          Client->>Client: build_payload() 序列化 ChatMessage
+          Client->>HTTP: POST 请求 (timeout=30s)
+          HTTP->>API: Headers + JSON Body
+          alt 200 OK
+            API-->>Parser: 返回 choices[0].message.content
+            Parser-->>Client: ChatMessage(role="assistant")
+          else 401 / 429 / 500
+            API-->>Parser: 返回错误状态码与 error.message
+            Parser-->>Client: 抛出 AuthenticationError / RateLimitError / ServerError
+          end
+      </div>
+    </div>
+
+    <h2>二、上午实操：HTTP 关键请求头与请求体结构</h2>
+    <div class="card">
+      <p>向 <code>https://api.deepseek.com/v1/chat/completions</code> 发起一次标准对话请求时，HTTP 报文的完整结构如下：</p>
+      <pre><code>POST /v1/chat/completions HTTP/1.1
+Host: api.deepseek.com
+Authorization: Bearer sk-your-api-key
+Content-Type: application/json
+
+{
+  "model": "deepseek-chat",
+  "messages": [
+    {"role": "system", "content": "你是星辰数科智枢平台架构师。"},
+    {"role": "user", "content": "请解释什么是 HTTP POST？"}
+  ],
+  "temperature": 0.7,
+  "max_tokens": 1024,
+  "stream": false
+}</code></pre>
+    </div>
+
+    <h2>三、下午：企业需求 PRD 与异常映射体系设计</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #012（产品经理 林晓 / Tech Lead 张工 提出）：</strong>封装 <code>zhishu_agent/llm_client.py</code>，要求：</p>
+      <ul>
+        <li>使用现代异步/同步双支持 HTTP 库 <code>httpx</code>，通过 <code>transport</code> 参数支持注入 <code>httpx.MockTransport</code>。</li>
+        <li>精准拦截 <code>401</code>（鉴权失败，不可重试）、<code>429</code>（限流，解析 <code>Retry-After</code>）、<code>5xx</code>（服务端异常）以及网络超时。</li>
+        <li>严格校验返回 JSON 的 <code>choices[0].message.content</code>，防止厂商返回空值或 HTML 网关报错页面导致后续流程崩溃。</li>
+      </ul>
+    </div>
+
+    <h2>四、下午实操：核心代码逐行解析（MockTransport 离线可运行）</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_12/zhishu_agent/llm_client.py</code> 核心调用与测试模式：</p>
+      <pre><code>import json
+import httpx
+from zhishu_agent.exceptions import AuthenticationError, RateLimitError, ServerError
+from zhishu_agent.llm_client import LLMClient
+from zhishu_agent.message import ChatMessage
+
+# 1. 定义离线 MockTransport，100% 模拟云端大模型网关
+def mock_gateway(request: httpx.Request) -&gt; httpx.Response:
+    if request.headers.get("Authorization") == "Bearer sk-invalid":
+        return httpx.Response(401, json={"error": {"message": "Invalid API Key"}})
+    payload = json.loads(request.content.decode("utf-8"))
+    return httpx.Response(
+        200,
+        json={
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": f"[Mock:{payload['model']}] 收到：{payload['messages'][-1]['content']}"
+                }
+            }]
+        },
+    )
+
+# 2. 注入 MockTransport 进行零成本离线调用
+transport = httpx.MockTransport(mock_gateway)
+with LLMClient(api_key="sk-demo", transport=transport) as client:
+    reply = client.chat([ChatMessage(role="user", content="你好，智枢！")])
+    print(reply)</code></pre>
+    </div>
+
+    <h2>五、课堂笔记：大模型常见 HTTP 状态码速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>HTTP 状态码</th><th>含义</th><th>映射异常类</th><th>企业级处理建议</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>200 OK</code></td><td>请求成功并返回结果</td><td>无</td><td>解析 <code>choices[0].message.content</code></td></tr>
+          <tr><td><code>400 Bad Request</code></td><td>请求体参数或模型名错误</td><td><code>LLMAPIError</code></td><td>检查 JSON 字段、<code>temperature</code> 或上下文长度</td></tr>
+          <tr><td><code>401 Unauthorized</code></td><td>API Key 无效、过期或缺失</td><td><code>AuthenticationError</code></td><td><strong>禁止重试</strong>，立即告警并检查环境变量</td></tr>
+          <tr><td><code>429 Too Many Requests</code></td><td>触发限流（RPM/TPM）或余额不足</td><td><code>RateLimitError</code></td><td>读取 <code>Retry-After</code>，执行指数退避重试</td></tr>
+          <tr><td><code>500 / 502 / 503</code></td><td>大模型服务端或网关临时故障</td><td><code>ServerError</code></td><td>记录日志，可有限次重试或切换备用厂商</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>六、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1：</strong>编写 <code>classify_http_status(status_code: int)</code>，对 200/400/401/429/5xx 进行诊断分类并给出 <code>should_retry</code> 布尔建议。</p>
+      <p><strong>作业 2：</strong>编写 <code>build_deepseek_payload(...)</code>，校验参数并构造标准 <code>/v1/chat/completions</code> 请求体字典。</p>
+      <p><strong>作业 3：</strong>编写 <code>safe_ask(client, question)</code> 封装，捕获 <code>AuthenticationError</code>（401）与 <code>RateLimitError</code>（429），并用 <code>httpx.MockTransport</code> 离线验证。</p>
+      <details>
+        <summary>点击展开完整参考答案</summary>
+        <pre><code># 作业 1 参考答案
+def classify_http_status(status_code: int) -&gt; dict[str, object]:
+    if status_code == 200:
+        return {"category": "请求成功", "should_retry": False}
+    if status_code == 400:
+        return {"category": "客户端请求参数错误", "should_retry": False}
+    if status_code == 401:
+        return {"category": "鉴权失败（API Key 无效或过期）", "should_retry": False}
+    if status_code == 429:
+        return {"category": "触发限流（RPM/TPM 超限）", "should_retry": True}
+    if status_code in (500, 502, 503):
+        return {"category": "服务端临时故障", "should_retry": True}
+    return {"category": f"未知状态码 ({status_code})", "should_retry": False}
+
+# 作业 2 参考答案
+def build_deepseek_payload(system_prompt: str, user_prompt: str, model: str = "deepseek-chat", temperature: float = 0.7, max_tokens: int = 2048, stream: bool = False) -&gt; dict[str, object]:
+    if not system_prompt.strip() or not user_prompt.strip():
+        raise ValueError("system_prompt 和 user_prompt 均不能为空")
+    if not (0.0 &lt;= temperature &lt;= 2.0):
+        raise ValueError("temperature 必须在 0.0 到 2.0 之间")
+    return {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt.strip()},
+            {"role": "user", "content": user_prompt.strip()},
+        ],
+        "temperature": float(temperature),
+        "max_tokens": max_tokens,
+        "stream": stream,
+    }
+
+# 作业 3 参考答案
+import httpx
+from zhishu_agent.exceptions import AuthenticationError, RateLimitError
+from zhishu_agent.llm_client import LLMClient
+from zhishu_agent.message import ChatMessage
+
+def safe_ask(client: LLMClient, question: str) -&gt; str:
+    try:
+        return client.chat([ChatMessage(role="user", content=question)]).content
+    except AuthenticationError:
+        return "错误：API Key 无效，请立即停止并检查环境变量配置。"
+    except RateLimitError as exc:
+        wait_sec = exc.retry_after if exc.retry_after is not None else 1.0
+        return f"限流告警：请求过于频繁，建议 {wait_sec} 秒后重试。"</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
