@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 15 | 智枢企业级智能体平台 · 大模型原理与 Token 成本核算</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第二阶段：大模型原理与 Web 服务工程 · Day 15 | 版本 v0.2.0-day15</div>
+      <h1>大模型底层原理、Token 分词机制与企业 API 成本核算</h1>
+      <p>企业需求驱动（Issue #015）：掌握 NLP → Transformer → Pretrain/SFT/RLHF 演进脉络，构建多语言 Token 估算与 5 大主流模型成本对比引擎</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（第二阶段开篇）：</strong><br />
+      欢迎进入《智枢企业级智能体平台》第二阶段！在第一阶段我们交付了命令行多轮对话助手（<code>v0.1.0-day14</code>），从今天起我们将迈向大模型核心原理与 FastAPI Web 服务（<code>v0.2.0</code>）。在生产环境中，每一次 API 调用都在消耗真金白银的 Token。产品经理林晓在 Issue #015 中要求我们：先摸清大模型的“大脑构造”与“计费单位（Token）”，再写出可落地的企业级成本核算器！
+    </div>
+
+    <h2>一、大模型演进全景：从传统 NLP 到 RLHF 对齐</h2>
+    <div class="card">
+      <p>现代大语言模型（LLM）并非一夜诞生，而是经历了从统计语言模型到 <strong>Transformer 自注意力架构</strong>，再到<strong>预训练（Pretrain）→ 有监督微调（SFT）→ 人类反馈强化学习（RLHF）</strong>的三阶段训练范式。</p>
+      <div class="mermaid">
+        flowchart LR
+          NLP["传统 NLP<br/>N-gram / RNN / LSTM"] --> Trans["Transformer 架构<br/>Self-Attention (Q, K, V)<br/>并行计算长距离依赖"]
+          Trans --> Pretrain["1. Pretrain 预训练<br/>海量文本 Next-Token Prediction<br/>注入世界知识"]
+          Pretrain --> SFT["2. SFT 有监督微调<br/>高质量问答对<br/>学会遵循人类指令"]
+          SFT --> RLHF["3. RLHF / DPO 对齐<br/>偏好奖励建模<br/>安全、有帮助、诚实"]
+          RLHF --> Cost["企业落地核心约束<br/>Token 计费与上下文窗口管理"]
+      </div>
+
+      <h3>核心概念速览</h3>
+      <table>
+        <thead>
+          <tr><th>阶段 / 机制</th><th>核心原理</th><th>对 Agent 开发的工程启示</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Self-Attention (Q, K, V)</strong></td>
+            <td>计算序列中任意两个 Token 的相关性权重：<code>Softmax(QK^T / √d_k)V</code></td>
+            <td>注意力计算复杂度为 <code>O(N²)</code>，上下文越长，延迟与显存/费用越高</td>
+          </tr>
+          <tr>
+            <td><strong>Pretrain (预训练)</strong></td>
+            <td>自回归预测下一个 Token（Next-Token Prediction）</td>
+            <td>大模型本质是“概率续写引擎”，需要清晰 Prompt 约束输出边界</td>
+          </tr>
+          <tr>
+            <td><strong>SFT &amp; RLHF</strong></td>
+            <td>指令微调 + 人类偏好对齐</td>
+            <td>区分 System / User / Assistant 角色，避免越狱或格式失控</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>二、Token 是什么？为什么中文比英文更“费”Token？</h2>
+    <div class="card">
+      <p>大模型并不直接认识汉字或英文单词，而是通过 <strong>BPE（Byte Pair Encoding）</strong> 等子词分词器将文本切分为整数 ID 序列（Token）。在通用词表中：</p>
+      <ul>
+        <li><strong>ASCII / 英文单词</strong>：常见单词往往整体或按词根切分，平均约 <strong>4 个字符 ≈ 1 Token</strong>（即 <code>0.25 tokens/char</code>）。</li>
+        <li><strong>CJK 中文字符</strong>：由于汉字数量庞大，部分生僻字或词组会被拆分为多个字节级 Token，通用词表下平均约 <strong>1.5 tokens/汉字</strong>。</li>
+      </ul>
+      <pre><code>def estimate_tokens(text: str) -> int:
+    # CJK 字符及全角标点: 1.5 tokens/char
+    # ASCII 非空白字符: 0.25 tokens/char
+    # 空白字符: 0.1 tokens/char
+    raw_tokens = cjk_count * 1.5 + ascii_non_space * 0.25 + whitespace * 0.1 + other * 1.0
+    return max(1, math.ceil(raw_tokens))</code></pre>
+    </div>
+
+    <h2>三、主流大模型定价对比与成本流水线</h2>
+    <div class="card">
+      <div class="mermaid">
+        flowchart LR
+          Text["Prompt + Completion<br/>中英文业务文本"] --> Est["estimate_tokens()<br/>估算输入/输出 Token"]
+          Est --> Price["MODEL_PRICING<br/>读取百万 Token 单价"]
+          Price --> Calc["estimate_api_cost()<br/>计算 USD 与 RMB 费用"]
+          Calc --> Rank["compare_models_cost()<br/>按总成本升序排序"]
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>模型名称</th>
+            <th>所属厂商</th>
+            <th>输入单价 ($ / 1M)</th>
+            <th>输出单价 ($ / 1M)</th>
+            <th>上下文窗口</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>DeepSeek-V3</code></td><td>DeepSeek</td><td>$0.27</td><td>$1.10</td><td>64K</td></tr>
+          <tr><td><code>Qwen-Plus</code></td><td>Alibaba Cloud</td><td>$0.40</td><td>$1.20</td><td>128K</td></tr>
+          <tr><td><code>Llama-3.1-70B</code></td><td>Meta (Hosted)</td><td>$0.59</td><td>$0.79</td><td>128K</td></tr>
+          <tr><td><code>GPT-4o</code></td><td>OpenAI</td><td>$2.50</td><td>$10.00</td><td>128K</td></tr>
+          <tr><td><code>Claude-3.5-Sonnet</code></td><td>Anthropic</td><td>$3.00</td><td>$15.00</td><td>200K</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>四、本地运行与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 15 Token 成本对比演示
+.venv/bin/python project_iterations/day_15/main.py
+
+# 2. 一键执行 Day 15 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_02_llm_and_web/day_15/notebook.ipynb \
+  --iter project_iterations/day_15</code></pre>
+      <details>
+        <summary>点击查看：企业降本增效实战技巧</summary>
+        <p>在智枢平台后续的路由层设计中，我们将采用“分级路由策略”：简单意图识别与客服问答路由至 <code>DeepSeek-V3</code> 或 <code>Qwen-Plus</code>（成本可降低 90% 以上），复杂代码与多步推理任务再路由至 <code>GPT-4o</code> 或 <code>Claude-3.5-Sonnet</code>。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
