@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 33 | 智枢企业级智能体平台 · 高级 RAG Part 2：混合检索、RRF、重排与父文档检索</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 33 | 版本 v0.3.0-day33</div>
+      <h1>高级 RAG Part 2：混合检索、RRF、重排与父文档检索</h1>
+      <p>企业需求驱动（Issue #033）：打通 BM25 + Vector 双路召回、RRF 倒数排名融合、Cross-Encoder 精排与 Small-to-Big 父文档检索</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“能搜到”到“搜得准、上下文全”）：</strong><br />
+      欢迎来到 Day 33！在真实企业知识库中，仅靠单路向量检索往往会在精确错误码（如 <code>ERR_NGX_502</code>）和长文档上下文完整性上掉链子。今天我们将手写纯标准库的 <code>BM25Retriever</code>、<code>reciprocal_rank_fusion</code>、<code>CrossEncoderReranker</code> 与 <code>ParentDocumentRetriever</code>，打造工业级高准确率 RAG 检索流水线！
+    </div>
+
+    <h2>一、四段式高级 RAG 检索流水线</h2>
+    <div class="card">
+      <p>从用户提问到最终输出高信噪比父文档上下文，完整数据流如下：</p>
+      <div class="mermaid">
+        flowchart LR
+          Q["用户提问 Query"] --> BM25["BM25Retriever 稀疏检索"]
+          Q --> VEC["VectorRetriever 向量检索"]
+          BM25 --> RRF["reciprocal_rank_fusion (k=60)"]
+          VEC --> RRF
+          RRF --> RERANK["CrossEncoderReranker 精排"]
+          RERANK --> PARENT["ParentDocumentRetriever 子切片映射父文档"]
+          PARENT --> CTX["高信噪比完整上下文"]
+      </div>
+    </div>
+
+    <h2>二、四大核心组件拆解</h2>
+    <div class="card">
+      <h3>1. BM25 vs 向量检索（双路互补）</h3>
+      <table>
+        <thead>
+          <tr><th>检索方式</th><th>擅长场景</th><th>典型短板</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>BM25Retriever</code>（稀疏词法）</td><td>精确错误码、工单号、专有名词、稀有词</td><td>同义词/语义改写（如“年假” vs “带薪休假”）召回弱</td></tr>
+          <tr><td><code>VectorRetriever</code>（稠密语义）</td><td>语义相似、口语化提问、跨表达匹配</td><td>精确编号、超短关键词容易被语义稀释</td></tr>
+        </tbody>
+      </table>
+
+      <h3>2. RRF 倒数排名融合（<code>reciprocal_rank_fusion</code>）</h3>
+      <p>公式：<code>RRF(d) = sum(1 / (k + rank(d)))</code>（默认平滑常数 <code>k = 60</code>）。无需对 BM25 与余弦相似度做分数归一化，即可稳健合并多路排名并放大“共识文档”权重。</p>
+
+      <h3>3. Cross-Encoder 精排（<code>CrossEncoderReranker</code>）</h3>
+      <pre><code>bm25_hits = bm25.retrieve(query, top_k=5)
+vec_hits = vector.retrieve(query, top_k=5)
+fused_docs = [doc for doc, _ in reciprocal_rank_fusion([bm25_hits, vec_hits], k=60)]
+top_docs = CrossEncoderReranker().rerank(query, fused_docs, top_k=3)</code></pre>
+
+      <h3>4. 父文档检索（<code>ParentDocumentRetriever</code>）</h3>
+      <p>采用 <strong>Small-to-Big</strong> 策略：入库时将长文档切分为细粒度子切片建立混合索引；检索时先定位最精确的子切片，再按 <code>parent_id</code> 去重映射回完整父文档，兼顾“检索精度”与“LLM 上下文完整度”。</p>
+    </div>
+
+    <h2>三、本地运行与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 33 混合检索演示脚本
+.venv/bin/python project_iterations/day_33/main.py
+
+# 2. 一键执行 Day 33 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_03_langchain_and_rag/day_33/notebook.ipynb \
+  --iter project_iterations/day_33</code></pre>
+      <details>
+        <summary>点击查看：为什么 RRF 比直接把 BM25 分数和 Cosine 分数相加更好？</summary>
+        <p>BM25 分数无上界（可能为 0~25+），而余弦相似度固定在 [-1, 1]。直接相加会导致大数吃小数。RRF 只看排名位置 <code>1 / (k + rank)</code>，天然量纲无关且对异常值鲁棒。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
