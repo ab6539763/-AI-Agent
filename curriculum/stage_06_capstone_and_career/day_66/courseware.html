@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 66 | 智枢企业级智能体平台 · 简历与作品集打磨（STAR 生成器 & README 质检器）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .bad { border-left: 4px solid var(--rose); }
+    .good { border-left: 4px solid var(--green); }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+    .interactive-box input, .interactive-box textarea, .interactive-box select {
+      width: 100%;
+      box-sizing: border-box;
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 6px 0 12px;
+      font-family: inherit;
+    }
+    .btn {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn:hover { opacity: 0.9; }
+    .result-pill {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      margin-right: 6px;
+    }
+    .pill-pass { background: rgba(52, 211, 153, 0.2); color: var(--green); }
+    .pill-fail { background: rgba(251, 113, 133, 0.2); color: var(--rose); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第六阶段：综合实战与求职冲刺 · Day 66 | 版本 v1.0.0-day66</div>
+      <h1>简历与作品集打磨：STAR 法则简历生成器 & GitHub README 质量检查器</h1>
+      <p>企业需求驱动（Issue #066）：星辰数科团队协作，将「智枢企业级智能体平台」实战成果转化为高转化率的求职简历与开源作品集</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（为什么工程师也需要“用代码检查简历”？）：</strong><br />
+      技术面试官每天要看上百份简历，真正能过初筛的往往不是“做过什么”，而是<strong>“痛点清晰（S/T） + 方案硬核（A） + 结果可量化（R）”</strong>。今天在 <strong>Day 66</strong>，PM 林晓与 Tech Lead 张工联合陈默、李婷、赵磊，将招聘官的筛选标准固化进 <code>zhishu_agent/portfolio_builder.py</code>，用自动化规则帮你完成简历排雷与 GitHub 仓库包装！
+    </div>
+
+    <h2>一、简历质检与作品集打包流水线</h2>
+    <div class="card">
+      <p><code>portfolio_builder.py</code> 由三大核心引擎构成：<strong>STAR 条目质检器</strong>、<strong>GitHub README 评分器</strong> 与 <strong>三岗位定制生成器</strong>。</p>
+      <div class="mermaid">
+        flowchart LR
+          RAW["原始简历草稿 / STARBullet"] --> AUDIT["audit_resume_bullets()"]
+          AUDIT --> CHECK1["量化指标检查 (%, ms, Recall, QPS)"]
+          AUDIT --> CHECK2["AI 技术词检查 (RAG, HITL, MCP, SSE)"]
+          AUDIT --> CHECK3["强动作动词检查 (主导/设计/重构)"]
+          README["GitHub README.md"] --> RAUDIT["audit_github_readme()"]
+          RAUDIT --> SCORE["6大维度加权评分 (0-100 / A-D)"]
+          CHECK1 & CHECK2 & CHECK3 --> GEN["generate_resume_markdown()"]
+          GEN --> ROLES["AI App / Agent / RAG Engineer 定制简历"]
+      </div>
+    </div>
+
+    <h2>二、星辰数科团队角色分工（Issue #066）</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>成员</th><th>角色</th><th>Day 66 核心交付与把关要点</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>林晓</td><td>产品经理 (PM)</td><td>定义三类求职者（转行者 / 应届生 / 产品经理）STAR 改写模板与岗位画像</td></tr>
+          <tr><td>张工</td><td>Tech Lead</td><td>审定 <code>STARBullet</code> 数据模型、<code>TECH_KEYWORDS</code> 技术词典与岗位相关性排序算法</td></tr>
+          <tr><td>陈默</td><td>全栈 AI 工程师</td><td>实现 <code>portfolio_builder.py</code> 与 <code>main.py</code> 端到端命令行演示</td></tr>
+          <tr><td>李婷</td><td>QA 工程师</td><td>编写 5 组 <code>pytest</code> 单测验证空洞条目拦截、README 评分与岗位排序</td></tr>
+          <tr><td>赵磊</td><td>DevOps 工程师</td><td>把关 GitHub README 的 Quickstart 可复现命令、Benchmarks 与 License 规范</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、Before / After 实战改写对照</h2>
+    <div class="grid-2">
+      <div class="card bad">
+        <h3>❌ 改写前（容易被初筛淘汰）</h3>
+        <p>“参与公司智能体平台开发，使用大模型和向量数据库做了问答和审批功能，运行稳定，效果不错。”</p>
+        <p style="color: var(--muted); font-size: 14px;">诊断：动词偏弱（参与）、无具体架构词（未提 BM25/RRF/HITL/SSE）、无任何量化结果。</p>
+      </div>
+      <div class="card good">
+        <h3>✅ 改写后（STAR 高亮版）</h3>
+        <p>“针对高风险资金划拨存在越权风险，主导构建 HITL 审批闭环；基于 FastAPI SSE 与 SQLite 状态机实现幂等流转与 PII 脱敏，高风险动作 100% 人工复核，重复审批拦截率 100%，通过 25 项 pytest 回归。”</p>
+      </div>
+    </div>
+
+    <h2>四、交互式 STAR 简历条目快速自检台</h2>
+    <div class="card interactive-box">
+      <p>在下方输入一条你的项目描述，点击「立即体检」，实时检查是否命中量化指标与核心 AI 技术词：</p>
+      <textarea id="bulletInput" rows="3">针对财报长尾词漏召回，主导搭建 BM25 + FAISS + RRF 混合检索链路，Top-5 召回率从 71% 提升至 92%，P95 延迟降至 165ms。</textarea>
+      <button class="btn" onclick="checkBullet()">立即体检</button>
+      <div id="auditResult" style="margin-top: 14px;"></div>
+    </div>
+
+    <h2>五、课后自测思考题</h2>
+    <div class="card">
+      <details>
+        <summary>1. GitHub README 满分 100 分的 6 大检查维度分别是什么？</summary>
+        <p>系统架构图（20分）、Quickstart 可复现命令（20分）、API 接口文档（20分）、量化评测基线（20分）、Demo GIF/截图（10分）、开源协议 License（10分）。</p>
+      </details>
+      <details>
+        <summary>2. 为什么投递 Agent Engineer 与 RAG Engineer 不能共用同一份排序的简历？</summary>
+        <p>面试官前 15 秒只看前两条项目经历。<code>generate_resume_markdown()</code> 会依据岗位画像中的 <code>priority_keywords</code> 与 <code>role_tags</code> 动态把最契合的项目置顶，最大化首屏匹配度。</p>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+
+    function checkBullet() {
+      const text = document.getElementById("bulletInput").value.trim();
+      const metricRegex = /(\d+(?:\.\d+)?\s*%|\d+(?:\.\d+)?\s*(?:ms|s|倍|x|万|千|QPS|TPS)|(?:P95|P99|Top-\d+|Recall)\s*[:：=]?\s*\d+)/gi;
+      const techList = ["RAG", "BM25", "RRF", "FAISS", "Milvus", "FastAPI", "SSE", "HITL", "MCP", "LangGraph", "Agent", "Pydantic", "SQLite", "pytest", "PII", "Rerank"];
+      const metrics = text.match(metricRegex) || [];
+      const techs = techList.filter(k => text.toLowerCase().includes(k.toLowerCase()));
+
+      const box = document.getElementById("auditResult");
+      const mPill = metrics.length > 0
+        ? `<span class="result-pill pill-pass">量化指标 ✓ (${metrics.join(", ")})</span>`
+        : `<span class="result-pill pill-fail">缺少量化指标 ✗</span>`;
+      const tPill = techs.length > 0
+        ? `<span class="result-pill pill-pass">技术关键词 ✓ (${techs.join(", ")})</span>`
+        : `<span class="result-pill pill-fail">缺少技术关键词 ✗</span>`;
+      box.innerHTML = mPill + tPill;
+    }
+    checkBullet();
+  </script>
+</body>
+</html>
