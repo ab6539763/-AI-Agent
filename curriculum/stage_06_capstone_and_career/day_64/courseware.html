@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 64 | 智枢企业级智能体平台 · 毕业设计 Docker 部署上线、演示脚本与完整项目文档</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+    .btn {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-right: 8px;
+      margin-top: 8px;
+    }
+    .btn:hover { opacity: 0.9; }
+    .sim-box {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+      margin-top: 12px;
+      font-family: "JetBrains Mono", Consolas, monospace;
+      font-size: 13px;
+      color: var(--green);
+      min-height: 54px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第六阶段：综合实战与求职冲刺 · Day 64（收官里程碑） | 版本 v1.0.0-day64</div>
+      <h1>毕业设计 Docker 部署上线、演示脚本与完整项目文档</h1>
+      <p>企业需求驱动（Issue #064）：星辰数科「智枢企业级智能体平台 (ZhiShu-Agent)」生产容器化交付、发布前预检引擎与 5 步上线答辩演示</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从开发完成到生产上线）：</strong><br />
+      恭喜大家走到第 64 天！在企业真实研发流程中，“代码在本地跑通”只是万里长征的 70%；剩余 30% 决定了项目能否真正交付客户——<strong>多阶段安全容器构建、自动化发布预检、SHA-256 制品清单登记、以及稳定可复现的 15 分钟上线演示</strong>。今天由 DevOps <strong>赵磊</strong>、工程师 <strong>陈默</strong>、QA <strong>李婷</strong> 与 Tech Lead <strong>张工</strong> 联合完成 <code>v1.0.0-day64</code> 正式上线！
+    </div>
+
+    <h2>一、生产发布预检与 5 步上线流水线</h2>
+    <div class="card">
+      <p>发布引擎 <code>zhishu_agent/release_packager.py</code> 在构建或上线前依次执行容器基线校验、环境变量密钥检查、制品清单签发与 5 步端到端冒烟演示。</p>
+      <div class="mermaid">
+        flowchart LR
+          CFG["DeploymentConfig & .env"] --> PRE["run_preflight_checks()"]
+          PRE --> D["validate_dockerfile()<br/>多阶段 / 非root / HEALTHCHECK"]
+          PRE --> C["validate_compose()<br/>ports / volumes / restart"]
+          PRE --> E["check_env_vars()<br/>防生产占位符密钥"]
+          D & C & E -->|"PASS"| MAN["generate_release_manifest()<br/>SHA-256 制品清单"]
+          MAN --> DEMO["DemoRunner 5 步上线演示"]
+          DEMO --> PROD["Docker Compose 生产运行"]
+      </div>
+    </div>
+
+    <h2>二、企业研发团队角色分工与核心交付物</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>团队角色</th>
+            <th>负责人</th>
+            <th>Day 64 核心职责</th>
+            <th>对应交付物</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>产品经理 (PM)</td>
+            <td>林晓</td>
+            <td>验收 15 分钟答辩演示脚本与业务闭环</td>
+            <td><code>docs/demo_and_deployment.md</code></td>
+          </tr>
+          <tr>
+            <td>Tech Lead</td>
+            <td>张工</td>
+            <td>架构评审与 MR !064 安全基线签发</td>
+            <td><code>docs/PRD_and_Architecture.md</code></td>
+          </tr>
+          <tr>
+            <td>全栈 AI 工程师</td>
+            <td>陈默</td>
+            <td>实现发布预检器、制品清单与 5 步 DemoRunner</td>
+            <td><code>zhishu_agent/release_packager.py</code></td>
+          </tr>
+          <tr>
+            <td>DevOps 工程师</td>
+            <td>赵磊</td>
+            <td>编写多阶段 Dockerfile、Compose 健康检查与卷挂载</td>
+            <td><code>Dockerfile</code> / <code>docker-compose.yml</code></td>
+          </tr>
+          <tr>
+            <td>QA 工程师</td>
+            <td>李婷</td>
+            <td>编写单元测试并执行 <code>verify_day.py</code> 全绿验收</td>
+            <td><code>tests/test_release_packager.py</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、交互式 5 步答辩演示模拟器</h2>
+    <div class="card">
+      <p>点击下方按钮，按毕业答辩现场顺序体验 <code>DemoRunner</code> 的 5 个核心观测节点：</p>
+      <button class="btn" onclick="simStep(1)">Step 1: 健康检查</button>
+      <button class="btn" onclick="simStep(2)">Step 2: 混合 RAG</button>
+      <button class="btn" onclick="simStep(3)">Step 3: 财务比率工具</button>
+      <button class="btn" onclick="simStep(4)">Step 4: HITL 审批</button>
+      <button class="btn" onclick="simStep(5)">Step 5: 审计导出</button>
+      <div id="simOutput" class="sim-box">点击上方任意步骤按钮，查看对应接口响应摘要...</div>
+    </div>
+
+    <h2>四、课后思考与自测</h2>
+    <div class="card">
+      <details>
+        <summary>思考题：为什么生产环境 Dockerfile 必须使用多阶段构建 + 非 root 用户？</summary>
+        <p>多阶段构建可剥离 <code>build-essential</code> 等编译期工具链，缩减镜像体积并减少 CVE 漏洞面；非 root 用户（<code>USER appuser</code>）遵循最小权限原则，即便发生应用层漏洞也能防止容器内提权。</p>
+      </details>
+      <details>
+        <summary>思考题：如何防止团队把 .env.example 中的占位符密钥误带入生产环境？</summary>
+        <p><code>check_env_vars()</code> 在检测到 <code>APP_ENV == "production"</code> 时，会对 <code>change-me-in-production</code>、<code>your-api-key-here</code> 等常见占位符进行黑名单拦截，直接阻断预检通过。</p>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+    const stepOutputs = {
+      1: '[Step 1] GET /api/v1/health -> 200 OK {"status": "ok", "service": "zhishu-agent", "version": "v1.0.0-day64"}',
+      2: '[Step 2] POST /api/v1/rag/query -> 命中 2 份文档 [fin-2025-q4, risk-policy-2025]，确认 2025 Q4 营收 12.8 亿元及 50 万元 HITL 红线',
+      3: '[Step 3] POST /api/v1/tools/financial-ratio -> {"net_profit_margin_pct": 16.41, "roe_pct": 20.0, "debt_to_asset_pct": 38.0}',
+      4: '[Step 4] POST /api/v1/hitl/submit & approve -> 85 万元 GPU 集群扩容申请已由张工批准 (status: "approved")，二次提交返回 409 Conflict',
+      5: '[Step 5] GET /api/v1/audit/export -> 成功导出 5+ 条全链路合规审计事件 (health_check -> rag_query -> financial_ratio_tool -> hitl_resolved)'
+    };
+    function simStep(n) {
+      document.getElementById("simOutput").textContent = stepOutputs[n];
+    }
+  </script>
+</body>
+</html>
