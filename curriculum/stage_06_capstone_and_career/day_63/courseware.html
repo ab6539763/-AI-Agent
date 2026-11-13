@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 63 | 智枢企业级智能体平台 · Ragas 评估报告与性能/成本压测优化</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 14px;
+      margin: 16px 0;
+    }
+    .kpi {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .kpi-label { font-size: 12px; color: var(--muted); }
+    .kpi-value { font-size: 22px; font-weight: 700; color: var(--green); margin-top: 4px; }
+    .kpi-sub { font-size: 12px; color: var(--accent); margin-top: 2px; }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+    .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+    button {
+      background: #0284c7;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+    }
+    button:hover { background: #0369a1; }
+    button.secondary { background: #334155; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第六阶段：综合实战与求职冲刺 · Day 63 | 版本 v1.0.0-day63</div>
+      <h1>Capstone Dev Day 5：毕业设计测试、Ragas 评估与性能/成本压测优化</h1>
+      <p>企业需求驱动（Issue #063）：星辰数科团队（林晓 / 张工 / 陈默 / 李婷 / 赵磊）联合验收「智枢企业级智能体平台」，建立 Ragas 质量门禁与 FinOps 降本增效闭环</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“能跑通”到“可上线”的最后一道质量与成本防线）：</strong><br />
+      在 Day 62 完成全栈 SSE 与 HITL 审批闭环后，QA 李婷和 DevOps 赵磊提出了一个非常现实的企业问题：<em>“如果每天有 10 万次员工与客户调用，我们的幻觉率可控吗？P95 延迟能压到 2 秒以内吗？账单会不会爆炸？”</em>今天在 <strong>Day 63</strong>，我们构建了 <code>CapstoneEvaluator</code> 与 <code>OptimizationAdvisor</code>，用数据说话，在守住 Ragas 质量门禁的前提下把千次请求成本打掉 <strong>60%</strong>！
+    </div>
+
+    <h2>一、Ragas 评估与 FinOps 优化闭环架构</h2>
+    <div class="card">
+      <p>评估流水线将离线 Ragas 四维指标（<code>faithfulness</code>、<code>answer_relevancy</code>、<code>context_precision</code>、<code>citation_accuracy</code>）与性能/成本基准（<code>p50_ms</code>、<code>p95_ms</code>、<code>cost_per_1k_req_cny</code>）绑定在同一份报告中，并通过三重优化策略进行量化对比。</p>
+      <div class="mermaid">
+        flowchart LR
+          CASES["EvalCase 基准测试集"] --> EVAL["CapstoneEvaluator 评估引擎"]
+          EVAL --> RAGAS["离线 Ragas 四维指标"]
+          EVAL --> PERF["P50/P95 & Token 成本基准"]
+          CASES --> ADV["OptimizationAdvisor 优化顾问"]
+          ADV --> S1["Prompt Caching 前缀缓存"]
+          ADV --> S2["Rerank Top-K 精排裁剪"]
+          ADV --> S3["Model Routing 分级路由"]
+          S1 & S2 & S3 --> OPT["Optimized 评估报告"]
+          RAGAS & PERF & OPT --> CMP["OptimizationComparison & ROI 建议"]
+      </div>
+    </div>
+
+    <h2>二、核心压测数据对比（交互式策略模拟器）</h2>
+    <div class="card">
+      <p>点击下方按钮切换优化策略组合，直观感受 <strong>Prompt Caching</strong>、<strong>Rerank Top-2</strong> 与 <strong>Model Routing</strong> 对 P95 延迟与千次成本的量化影响：</p>
+      <div class="btn-row">
+        <button onclick="renderScenario('baseline')">Baseline（基线全量 Flagship）</button>
+        <button onclick="renderScenario('cache_only')">仅开启 Prompt Caching</button>
+        <button onclick="renderScenario('full')">全量优化（Cache + Rerank + Routing）</button>
+      </div>
+      <div class="grid">
+        <div class="kpi">
+          <div class="kpi-label">综合 Ragas 评分</div>
+          <div class="kpi-value" id="kpi-ragas">0.7697</div>
+          <div class="kpi-sub" id="kpi-ragas-sub">质量门禁 PASS ✅</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">P95 响应延迟</div>
+          <div class="kpi-value" id="kpi-p95">1661.52 ms</div>
+          <div class="kpi-sub" id="kpi-p95-sub">较基线降低 27.76%</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">千次请求成本 (CNY)</div>
+          <div class="kpi-value" id="kpi-cost">¥21.38</div>
+          <div class="kpi-sub" id="kpi-cost-sub">较基线降低 60.02%</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Prompt Cache 命中率</div>
+          <div class="kpi-value" id="kpi-cache">55.00%</div>
+          <div class="kpi-sub" id="kpi-cache-sub">月省 ¥3,209.86（10万次）</div>
+        </div>
+      </div>
+    </div>
+
+    <h2>三、星辰数科团队协作与 MR !063 验收清单</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>角色</th>
+            <th>负责人</th>
+            <th>Day 63 交付与验收职责</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>产品经理 (PM)</td>
+            <td>林晓</td>
+            <td>验收月均 10 万次调用 ROI 节省报告（¥3,209.86/月）与质量门禁标准</td>
+          </tr>
+          <tr>
+            <td>Tech Lead</td>
+            <td>张工</td>
+            <td>评审 <code>capstone_eval.py</code> 中英文混合分词与计费边界钳位逻辑</td>
+          </tr>
+          <tr>
+            <td>全栈 AI 工程师</td>
+            <td>陈默</td>
+            <td>实现 <code>CapstoneEvaluator</code>、<code>OptimizationAdvisor</code> 与 CLI 报告</td>
+          </tr>
+          <tr>
+            <td>测试工程师 (QA)</td>
+            <td>李婷</td>
+            <td>编写 5 组核心 pytest 用例覆盖 Ragas 指标、百分位与成本核算</td>
+          </tr>
+          <tr>
+            <td>运维工程师 (DevOps)</td>
+            <td>赵磊</td>
+            <td>制定 P95 &lt; 2.0s SLA 告警阈值与 Prompt Caching 网关配置</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>四、随堂小测（点击展开解析）</h2>
+    <div class="card">
+      <p><strong>问题：</strong>为什么 Rerank Top-K 精排裁剪在减少 Prompt Token 成本的同时，还能正向提升 Ragas 的 <code>context_precision</code>？</p>
+      <details>
+        <summary>查看参考解析</summary>
+        <p><code>context_precision</code> 衡量排序靠前的检索片段中相关证据的加权纯度。通过 Cross-Encoder 将最相关的 Top-2 片段置顶并裁掉尾部无关的制度/行政噪音片段后，既减少了干扰信息（避免 LLM 中间迷失），又直接降低了 Input Token 消耗与预填充延迟。</p>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+    const scenarios = {
+      baseline: {
+        ragas: "0.7640",
+        ragasSub: "质量门禁 PASS ✅",
+        p95: "2300.00 ms",
+        p95Sub: "基线参考值",
+        cost: "¥53.48",
+        costSub: "未启用缓存与路由",
+        cache: "0.00%",
+        cacheSub: "月成本 ¥5,348.33（10万次）"
+      },
+      cache_only: {
+        ragas: "0.7640",
+        ragasSub: "无损等价推理 PASS ✅",
+        p95: "1932.00 ms",
+        p95Sub: "较基线降低 16.00%",
+        cost: "¥34.60",
+        costSub: "较基线降低 35.30%",
+        cache: "55.00%",
+        cacheSub: "月省 ¥1,888.33（10万次）"
+      },
+      full: {
+        ragas: "0.7697",
+        ragasSub: "较基线提升 +0.0057 ✅",
+        p95: "1661.52 ms",
+        p95Sub: "较基线降低 27.76%",
+        cost: "¥21.38",
+        costSub: "较基线降低 60.02%",
+        cache: "55.00%",
+        cacheSub: "月省 ¥3,209.86（10万次）"
+      }
+    };
+    function renderScenario(key) {
+      const s = scenarios[key];
+      document.getElementById("kpi-ragas").textContent = s.ragas;
+      document.getElementById("kpi-ragas-sub").textContent = s.ragasSub;
+      document.getElementById("kpi-p95").textContent = s.p95;
+      document.getElementById("kpi-p95-sub").textContent = s.p95Sub;
+      document.getElementById("kpi-cost").textContent = s.cost;
+      document.getElementById("kpi-cost-sub").textContent = s.costSub;
+      document.getElementById("kpi-cache").textContent = s.cache;
+      document.getElementById("kpi-cache-sub").textContent = s.cacheSub;
+    }
+  </script>
+</body>
+</html>
