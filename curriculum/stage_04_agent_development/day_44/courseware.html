@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 44 | 智枢企业级智能体平台 · MCP 协议与智能体双层记忆架构</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：智能体开发与多智能体编排 · Day 44 | 版本 v0.4.0-day44</div>
+      <h1>MCP（Model Context Protocol）与智能体双层记忆架构</h1>
+      <p>企业需求驱动（Issue #044）：基于 JSON-RPC 2.0 构建标准化 MCP Server/Client 工具资源总线，并实现短期滑动窗口 + SQLite 长期记忆的双层记忆系统</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“胶水代码”到“USB-C 标准化外接总线”）：</strong><br />
+      MCP（Model Context Protocol）就像 AI 智能体的 <strong>USB-C 接口</strong>：无论底层是数据库、本地文件系统还是记忆库，只要实现统一的 JSON-RPC 2.0 <code>initialize</code>、<code>tools/*</code> 与 <code>resources/*</code> 协议，任何 Agent Host 都可以通过 <code>MCPClient</code> 即插即用。与此同时，<strong>DualMemoryManager</strong> 将“近期高频对话（短期滑动窗口）”与“跨会话事实沉淀（SQLite 长期记忆）”解耦，让智能体既省 Token 又不会遗忘核心知识。
+    </div>
+
+    <h2>一、MCP 协议交互时序图（JSON-RPC 2.0）</h2>
+    <div class="card">
+      <p>Agent Host 通过 <code>MCPClient</code> 与 <code>MCPServer</code> 进行标准化 JSON-RPC 2.0 通信，完成能力协商、工具调用与资源读取：</p>
+      <div class="mermaid">
+        sequenceDiagram
+          autonumber
+          participant Host as Agent Host
+          participant Client as MCPClient
+          participant Server as MCPServer
+          participant Mem as DualMemoryManager
+
+          Host->>Client: initialize()
+          Client->>Server: JSON-RPC 2.0 {"method": "initialize"}
+          Server-->>Client: {"protocolVersion": "2024-11-05", "capabilities": {...}}
+
+          Host->>Client: list_tools() / list_resources()
+          Client->>Server: JSON-RPC 2.0 {"method": "tools/list"}
+          Server-->>Client: 返回工具 Schema 描述符列表
+
+          Host->>Client: call_tool("memory_store", {key, value})
+          Client->>Server: JSON-RPC 2.0 {"method": "tools/call", ...}
+          Server->>Mem: remember(key, value)
+          Mem-->>Server: 写入 SQLite 长期记忆
+          Server-->>Client: {"content": [...], "isError": false}
+
+          Host->>Client: read_resource("memory://stats")
+          Client->>Server: JSON-RPC 2.0 {"method": "resources/read", ...}
+          Server-->>Client: {"contents": [{"uri": "memory://stats", ...}]}
+      </div>
+    </div>
+
+    <h2>二、核心架构与协议对照表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>核心模块</th>
+            <th>职责定位</th>
+            <th>关键方法 / 协议规范</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>MCPServer</code></td>
+            <td>标准 JSON-RPC 2.0 服务端，托管工具与只读资源</td>
+            <td><code>initialize</code>、<code>tools/list</code>、<code>tools/call</code>、<code>resources/list</code>、<code>resources/read</code></td>
+          </tr>
+          <tr>
+            <td><code>MCPClient</code></td>
+            <td>Agent 侧协议客户端，封装请求编号与错误解析</td>
+            <td>自动递增 <code>id</code>，遇到 JSON-RPC <code>error</code> 抛出 <code>MCPClientError</code></td>
+          </tr>
+          <tr>
+            <td>短期滑动窗口</td>
+            <td>控制最近对话上下文长度，防止 Token 膨胀</td>
+            <td>按 <code>session_id</code> 维护 <code>deque(maxlen=window_size)</code>，支持 <code>add_turn()</code> 与淘汰</td>
+          </tr>
+          <tr>
+            <td>SQLite 长期记忆</td>
+            <td>跨进程/跨会话持久化关键事实与偏好</td>
+            <td>按 <code>namespace</code> 隔离，支持 <code>remember()</code>、<code>recall_key()</code>、<code>search_long_term()</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：MCP 握手、记忆工具调用与上下文融合</h2>
+    <div class="card">
+      <pre><code>from pathlib import Path
+from zhishu_agent import MCPClient, create_memory_enabled_mcp_server
+
+server, memory = create_memory_enabled_mcp_server(Path("zhishu_mem.db"), window_size=3)
+client = MCPClient(server=server)
+
+# 1. MCP 握手与工具发现
+client.initialize(client_name="zhishu-host")
+print("可用工具:", [t["name"] for t in client.list_tools()])
+
+# 2. 通过 MCP 工具写入与检索长期记忆
+client.call_tool("memory_store", {
+    "key": "pref_lang",
+    "value": "用户偏好使用 Python 3.11 与 FastAPI",
+    "namespace": "user-chenmo",
+    "tags": ["偏好", "技术栈"],
+})
+hits = client.call_tool("memory_search", {"query": "FastAPI 技术栈", "namespace": "user-chenmo"})
+print("检索结果:", hits["content"][0]["text"])
+
+# 3. 写入短期滑动窗口并构建融合上下文
+memory.add_turn("sess-01", "user", "帮我创建一个新的后端服务")
+ctx = memory.build_context("sess-01", "后端技术栈", namespace="user-chenmo", top_k=1)
+print("融合上下文:", ctx)</code></pre>
+    </div>
+
+    <h2>四、课后思考与自检清单</h2>
+    <div class="card">
+      <details>
+        <summary>点击展开：MCP 中参数校验失败（-32602）与工具内部异常（isError=True）有何区别？</summary>
+        <p>当请求缺少 <code>inputSchema.required</code> 中声明的必填字段或调用了不存在的工具名时，属于协议层面的 <strong>Invalid Params (-32602)</strong>，服务端应返回标准 JSON-RPC <code>error</code> 对象；而当参数合法但工具在执行外部业务时发生异常（如网络超时），服务端应返回正常 JSON-RPC <code>result</code> 并在内部标记 <code>"isError": true</code>，以便大模型感知错误原因并自主重试或降级。</p>
+      </details>
+      <details>
+        <summary>点击展开：为什么长期记忆需要按 namespace 隔离，而短期记忆按 session_id 隔离？</summary>
+        <p>短期记忆绑定单次对话流（<code>session_id</code>），不同对话窗口的上下文不能混杂；而长期记忆沉淀的是用户画像或租户级知识（<code>namespace</code>），同一用户在多个不同 <code>session_id</code> 中都应能跨会话召回自己的长期偏好。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
