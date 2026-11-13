@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 28 | 智枢企业级智能体平台 · 文档加载与文本切分（RAG Step 1）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与 RAG 实战 · Day 28 | 版本 v0.3.0-day28</div>
+      <h1>Document Loading &amp; Text Splitting（RAG Step 1）</h1>
+      <p>企业需求驱动（Issue #028）：构建多格式文档加载器与多策略智能文本切分引擎，打通企业私域知识库接入的第一公里</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（第三阶段 RAG 启航）：</strong><br />
+      大模型虽然博学，但它并不知道星辰数科内部的《差旅报销规范》和《微服务部署手册》。今天我们正式迈入 <strong>RAG（检索增强生成）</strong> 实战的第一步：把杂乱的 <code>.txt</code>、<code>.md</code>、<code>.csv</code> 企业文档标准化为 <code>Document</code> 对象，再用科学的切分策略切成大小适中、语义完整的 <strong>Chunk</strong>，为明天的向量化检索打下坚实底座！
+    </div>
+
+    <h2>一、RAG 文档接入与切分流水线（Pipeline）</h2>
+    <div class="card">
+      <p>从原始企业文件到可入库检索的语义切片，数据流向如下：</p>
+      <div class="mermaid">
+        flowchart LR
+          A["多源企业文档<br/>.txt / .md / .csv"] --> B["多格式 Loader<br/>Text / Markdown / CSV"]
+          B --> C["标准 Document<br/>page_content + metadata"]
+          C --> D{"切分策略选择"}
+          D -->|"通用长文本"| E["RecursiveCharacterTextSplitter<br/>['\\n\\n', '\\n', '。', ' ', '']"]
+          D -->|"固定分隔符"| F["CharacterTextSplitter<br/>chunk_size + chunk_overlap"]
+          D -->|"Markdown 手册"| G["MarkdownHeaderTextSplitter<br/>Header 1/2/3 元数据注入"]
+          E --> H["带溯源元数据的 Chunks"]
+          F --> H
+          G --> H
+      </div>
+    </div>
+
+    <h2>二、核心组件与切分策略对比</h2>
+    <div class="card">
+      <h3>1. 统一文档模型与多格式 Loader</h3>
+      <table>
+        <thead>
+          <tr><th>组件名称</th><th>适用场景</th><th>自动注入的元数据（Metadata）</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>Document</code></td><td>所有 Loader 与 Splitter 的标准输入输出</td><td>自定义字典（实例间严格浅拷贝隔离）</td></tr>
+          <tr><td><code>TextLoader</code></td><td>纯文本规范、日志文件（<code>.txt</code>）</td><td><code>source</code>, <code>file_name</code>, <code>file_type</code>, <code>loader</code></td></tr>
+          <tr><td><code>MarkdownLoader</code></td><td>研发手册、PRD 文档（<code>.md</code>）</td><td>自动提取首个 <code>#</code> 一级标题为 <code>title</code></td></tr>
+          <tr><td><code>CSVLoader</code></td><td>客服 FAQ、产品目录表（<code>.csv</code>）</td><td>逐行转为 Document，记录 <code>row</code> 行号与 <code>source_column</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>2. 三大 TextSplitter 原理与选型</h3>
+      <table>
+        <thead>
+          <tr><th>切分器</th><th>核心机制</th><th>工程优势</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>CharacterTextSplitter</code></td><td>按单一分隔符拆分后按窗口合并</td><td>逻辑简单，适合格式高度规整的日志或行记录</td></tr>
+          <tr><td><code>RecursiveCharacterTextSplitter</code></td><td>按 <code>["\n\n", "\n", "。", " ", ""]</code> 层级递归切分</td><td>优先保留段落与中文完整句意，仅在超长时逐级降级</td></tr>
+          <tr><td><code>MarkdownHeaderTextSplitter</code></td><td>按 <code>#</code> / <code>##</code> / <code>###</code> 标题状态机切分</td><td>保留章节层级到 <code>metadata</code>，且自动忽略代码块内 <code>#</code> 注释</td></tr>
+        </tbody>
+      </table>
+
+      <h3>3. 核心代码示例</h3>
+      <pre><code>from zhishu_agent.document_loader import (
+    MarkdownLoader,
+    MarkdownHeaderTextSplitter,
+    RecursiveCharacterTextSplitter,
+)
+
+docs = MarkdownLoader("handbook.md").load()
+header_chunks = MarkdownHeaderTextSplitter().split_documents(docs)
+
+recursive_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=300,
+    chunk_overlap=40,
+    separators=["\n\n", "\n", "。", " ", ""],
+)
+final_chunks = recursive_splitter.split_documents(header_chunks)</code></pre>
+    </div>
+
+    <h2>三、本地运行与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 28 演示程序
+.venv/bin/python project_iterations/day_28/main.py
+
+# 2. 一键执行 Day 28 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_03_langchain_and_rag/day_28/notebook.ipynb \
+  --iter project_iterations/day_28</code></pre>
+      <details>
+        <summary>点击查看：为什么建议先用 MarkdownHeaderTextSplitter，再套一层 RecursiveCharacterTextSplitter？</summary>
+        <p>这种“两阶段切分”是企业级 RAG 的最佳实践：先按 Markdown 标题把整篇文档拆成带章节元数据（<code>Header 1/2/3</code>）的语义块，如果某个章节本身依然超过向量模型的 Token 上限，再用 <code>RecursiveCharacterTextSplitter.split_documents()</code> 二次切分，既控制了长度，又让每个子片段都携带完整的章节归属信息！</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
