@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 60 | 智枢企业级智能体平台 · 毕业设计 Day 2：核心混合 RAG 与可溯源引用主链路</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第六阶段：毕业设计与就业冲刺 · Day 60 | 版本 v1.0.0-day60</div>
+      <h1>毕业设计 Day 2：核心混合 RAG 与可溯源引用主链路</h1>
+      <p>企业需求驱动（Issue #060）：构建 BM25 + 向量双路召回、RRF 融合重排、行内引用 [1][2] 与低置信度拒答引擎</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从能搜到敢信的企业级 RAG 主链路）：</strong><br />
+      在毕业设计 Day 1 完成架构立项后，今天 <strong>Day 60</strong> 我们正式实现智枢平台的核心引擎 <code>CapstoneRAGEngine</code>。生产级知识库问答不仅要求在 <code>ERR_502</code> 等精确关键词与自然语言语义间取得平衡，更要求<strong>每一句回答都有据可查（行内引用 <code>[1]</code>、<code>[2]</code>），证据不足时果断触发低置信度拒答</strong>。
+    </div>
+
+    <h2>一、核心混合 RAG 与可溯源引用流水线</h2>
+    <div class="card">
+      <p>全链路分为五大阶段：<strong>双路并行召回（BM25 + Vector） → RRF 倒数排序融合 → CrossReranker 精排 → 置信度门控 → 行内引用合成 / 拒答</strong>。</p>
+      <div class="mermaid">
+        flowchart LR
+          Q["用户提问 (Query)"] --> BM25["BM25Index: 稀疏关键词召回"]
+          Q --> VEC["VectorIndex: 稠密语义召回"]
+          BM25 --> RRF["RRF 倒数排序融合 (k=60)"]
+          VEC --> RRF
+          RRF --> RERANK["CrossReranker: 多维语义精排 [0,1]"]
+          RERANK --> GATE{"置信度 >= min_confidence ?"}
+          GATE -->|"低于阈值 / 无命中"| REFUSE["低置信度拒答 (refused=True, citations=[])"]
+          GATE -->|"通过阈值"| CITE["GroundedAnswerGenerator: 证据抽取 + 行内引用 [1][2]"]
+          CITE --> RESP["RAGResponse (Answer + Citations + Trace)"]
+      </div>
+    </div>
+
+    <h2>二、核心组件与工程职责规范</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>组件类 / 函数</th>
+            <th>核心职责</th>
+            <th>关键工程要点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>BM25Index</code></td>
+            <td>稀疏关键词精确检索</td>
+            <td>结合 <code>tokenize_mixed</code>（英文/错误码词元 + 中文 Unigram/Bigram），保障 <code>ERR_502</code>、数字条款零漏召</td>
+          </tr>
+          <tr>
+            <td><code>VectorIndex</code></td>
+            <td>稠密向量语义检索</td>
+            <td>基于 <code>DeterministicEmbedder</code>（Feature Hashing + L2 归一化）与余弦相似度，离线确定性运行</td>
+          </tr>
+          <tr>
+            <td><code>reciprocal_rank_fusion</code></td>
+            <td>多路排名融合</td>
+            <td>使用 $1/(k+\text{rank})$（默认 $k=60$）消除稀疏与稠密分数量纲差异，输出统一 <code>RetrievedChunk</code></td>
+          </tr>
+          <tr>
+            <td><code>CrossReranker</code></td>
+            <td>多信号精排与置信度标定</td>
+            <td>融合词元覆盖率、术语命中、标题匹配与 RRF 先验，输出归一化 <code>rerank_score ∈ [0, 1]</code></td>
+          </tr>
+          <tr>
+            <td><code>GroundedAnswerGenerator</code></td>
+            <td>行内引用合成与拒答门控</td>
+            <td>提取最优证据句并绑定 <code>[1]</code>、<code>[2]</code> <code>Citation</code>；低于 <code>min_confidence</code> 时触发防幻觉拒答</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、课后巩固与自测抽查</h2>
+    <div class="card">
+      <p>完整题目与参考答案请查阅 <a href="docs/homework_and_answers.md" style="color: var(--accent);">homework_and_answers.md</a>。</p>
+      <details>
+        <summary>自测抽查 1：为什么不能直接用 0.5 * BM25 + 0.5 * Cosine 融合两路检索结果？</summary>
+        <p>BM25 得分无固定上界（常在 2~30 之间），而余弦相似度位于 [-1, 1]，直接线性加权会被 BM25 量纲完全主导。采用 RRF 仅依赖排名位置融合，彻底摆脱量纲干扰。</p>
+      </details>
+      <details>
+        <summary>自测抽查 2：低置信度拒答机制如何防止大模型幻觉？</summary>
+        <p>在生成答案前设置置信度硬门控：当最高 <code>rerank_score &lt; min_confidence</code> 或无命中切片时，直接阻断生成并返回 <code>refused=True, citations=[]</code>，避免模型强行基于无关上下文编造答案。</p>
+      </details>
+      <details>
+        <summary>点击查看：Day 60 校验与运行命令</summary>
+        <pre><code>.venv/bin/python project_iterations/day_60/main.py
+.venv/bin/python scripts/verify_day.py --nb curriculum/stage_06_capstone_and_career/day_60/notebook.ipynb --iter project_iterations/day_60</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
