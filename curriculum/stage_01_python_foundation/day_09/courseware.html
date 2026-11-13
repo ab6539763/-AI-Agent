@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 09 | 智枢企业级智能体平台 · 面向对象进阶：继承、多态与 @property</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 2 周 · Day 09 | 版本 v0.1.0-day09</div>
+      <h1>面向对象进阶：多厂商大模型统一适配器（继承、多态与 @property）</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》—— 告别 if/elif 厂商分支判断，用 OOP 继承与多态实现 OpenAI / Qwen 可插拔模型引擎</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      各位同学好，欢迎来到第 9 天的研发实战！昨天我们用 <code>ChatMessage</code> 把消息数据封装成了规范的对象。今天产品经理林晓提出了一个企业级平台必遇的架构难题：<strong>公司既要调用 OpenAI，又要接入阿里云通义千问（Qwen），未来还要支持 DeepSeek</strong>。如果业务代码里写满 <code>if vendor == "openai": ... elif vendor == "qwen": ...</code>，每加一个模型都要改核心流程！今天我们用 <strong>继承（<code>BaseLLMModel -&gt; OpenAIModel / QwenModel</code>）、<code>super().__init__</code>、多态 <code>generate()</code>、魔术方法（<code>__str__</code> / <code>__repr__</code> / <code>__call__</code>）与 <code>@property</code> 参数守卫</strong>，彻底优雅地解决多模型适配问题。
+    </div>
+
+    <h2>一、上午：企业需求 PRD 与面向对象架构设计</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #009（产品经理 林晓 / Tech Lead 张工 提出）：</strong>智枢平台需要统一的模型基类 <code>BaseLLMModel</code>，强制校验采样温度 <code>0.0 &lt;= temperature &lt;= 2.0</code>，并让 <code>OpenAIModel</code> 与 <code>QwenModel</code> 多态实现 <code>generate(messages)</code>，对外提供一致的调用体验。</p>
+      <div class="mermaid">
+        classDiagram
+          class ChatMessage {
+            +str role
+            +str content
+            +str timestamp
+            +to_dict() dict
+            +__str__() str
+            +__repr__() str
+          }
+          class BaseLLMModel {
+            +str model_name
+            -float _temperature
+            +temperature() float
+            +temperature(value: float) void
+            #_validate_messages(messages) ChatMessage
+            +generate(messages) ChatMessage
+            +__call__(prompt_or_messages) ChatMessage
+            +__str__() str
+            +__repr__() str
+          }
+          class OpenAIModel {
+            +str api_base
+            +generate(messages) ChatMessage
+          }
+          class QwenModel {
+            +bool enable_search
+            +generate(messages) ChatMessage
+          }
+          BaseLLMModel &lt;|-- OpenAIModel : 继承 super().__init__
+          BaseLLMModel &lt;|-- QwenModel : 继承 super().__init__
+          BaseLLMModel ..&gt; ChatMessage : 输入输出契约
+      </div>
+    </div>
+
+    <h2>二、下午实操：核心代码逐行解析（可直接粘贴运行）</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_09/zhishu_agent/models.py</code>（已内置离线模拟推理，无需 API Key 即可直接运行）：</p>
+      <pre><code>from zhishu_agent.message import ChatMessage
+
+
+class BaseLLMModel:
+    """大模型适配器基类：定义统一接口、温度参数校验与魔术方法。"""
+
+    def __init__(self, model_name: str, temperature: float = 0.7) -&gt; None:
+        if not isinstance(model_name, str) or not model_name.strip():
+            raise ValueError("model_name 必须为非空字符串")
+        self.model_name = model_name.strip()
+        # 构造时直接走 @property setter，确保参数合法
+        self.temperature = temperature
+
+    @property
+    def temperature(self) -&gt; float:
+        return self._temperature
+
+    @temperature.setter
+    def temperature(self, value: float) -&gt; None:
+        # Python 中 bool 是 int 的子类，必须先显式排除 bool
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError(f"temperature 必须是数值类型，当前为 {type(value).__name__}")
+        temp = float(value)
+        if not (0.0 &lt;= temp &lt;= 2.0):
+            raise ValueError(f"temperature 必须在 0.0 到 2.0 之间，当前值为 {temp}")
+        self._temperature = temp
+
+    def _validate_messages(self, messages: list[ChatMessage]) -&gt; ChatMessage:
+        if not isinstance(messages, list) or len(messages) == 0:
+            raise ValueError("messages 必须是非空的 ChatMessage 列表")
+        for msg in messages:
+            if not isinstance(msg, ChatMessage):
+                raise TypeError("messages 元素必须是 ChatMessage")
+        return messages[-1]
+
+    def generate(self, messages: list[ChatMessage]) -&gt; ChatMessage:
+        self._validate_messages(messages)
+        raise NotImplementedError(f"{self.__class__.__name__} 必须重写 generate() 方法")
+
+    def __call__(self, prompt_or_messages: str | list[ChatMessage]) -&gt; ChatMessage:
+        if isinstance(prompt_or_messages, str):
+            messages = [ChatMessage(role="user", content=prompt_or_messages)]
+        else:
+            messages = prompt_or_messages
+        return self.generate(messages)
+
+    def __str__(self) -&gt; str:
+        return f"[{self.__class__.__name__}] {self.model_name} (temperature={self.temperature})"
+
+    def __repr__(self) -&gt; str:
+        return f"{self.__class__.__name__}(model_name={self.model_name!r}, temperature={self.temperature!r})"
+
+
+class OpenAIModel(BaseLLMModel):
+    """OpenAI 模型适配器（离线模拟推理）。"""
+
+    def __init__(
+        self,
+        model_name: str = "gpt-4o-mini",
+        temperature: float = 0.7,
+        api_base: str = "https://api.openai.com/v1",
+    ) -&gt; None:
+        super().__init__(model_name=model_name, temperature=temperature)
+        self.api_base = api_base
+
+    def generate(self, messages: list[ChatMessage]) -&gt; ChatMessage:
+        last_msg = self._validate_messages(messages)
+        reply = (
+            f"[OpenAI:{self.model_name}|temp={self.temperature}] "
+            f"已收到你的消息({len(messages)}轮上下文)：{last_msg.content}"
+        )
+        return ChatMessage(role="assistant", content=reply)
+
+
+class QwenModel(BaseLLMModel):
+    """通义千问 (Qwen) 模型适配器（离线模拟推理）。"""
+
+    def __init__(
+        self,
+        model_name: str = "qwen-plus",
+        temperature: float = 0.7,
+        enable_search: bool = False,
+    ) -&gt; None:
+        super().__init__(model_name=model_name, temperature=temperature)
+        self.enable_search = enable_search
+
+    def generate(self, messages: list[ChatMessage]) -&gt; ChatMessage:
+        last_msg = self._validate_messages(messages)
+        search_tag = "联网增强" if self.enable_search else "纯模型推理"
+        reply = (
+            f"[Qwen:{self.model_name}|temp={self.temperature}|{search_tag}] "
+            f"通义千问已处理请求：{last_msg.content}"
+        )
+        return ChatMessage(role="assistant", content=reply)</code></pre>
+    </div>
+
+    <h2>三、课堂笔记：今日核心知识速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>知识点</th><th>Python 语法</th><th>在智枢 Agent 平台中的工程价值</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>继承与 <code>super()</code></td><td><code>class OpenAIModel(BaseLLMModel):</code><br/><code>super().__init__(...)</code></td><td>复用公共属性与校验逻辑，杜绝多厂商适配器中的重复代码</td></tr>
+          <tr><td>多态 (Polymorphism)</td><td>子类重写 <code>generate(messages)</code></td><td>上层路由只需面向 <code>BaseLLMModel</code> 编程，无缝热切换模型</td></tr>
+          <tr><td><code>@property</code> 守卫</td><td><code>@property</code> + <code>@temperature.setter</code></td><td>将温度越界拦截在本地内存阶段，避免无效网络请求与线上报错</td></tr>
+          <tr><td><code>__str__</code> vs <code>__repr__</code></td><td><code>str(obj)</code> / <code>repr(obj)</code></td><td>前者用于日志/终端友好展示，后者用于开发者调试精确还原对象</td></tr>
+          <tr><td><code>__call__</code> 魔术方法</td><td><code>model("你好")</code></td><td>让模型实例像函数一样被调用，极大简化 Agent Prompt 编排代码</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>四、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1：</strong>继承 <code>BaseLLMModel</code> 实现 <code>DeepSeekModel</code> 子类，新增 <code>reasoning_mode: bool = False</code> 属性并多态重写 <code>generate()</code>。</p>
+      <p><strong>作业 2：</strong>使用 <code>@property</code> 为配置类实现 <code>max_tokens</code> 校验（必须为 <code>int</code> 且排除 <code>bool</code>，范围 <code>[1, 128000]</code>）。</p>
+      <p><strong>作业 3：</strong>为多轮对话类 <code>Conversation</code> 实现 <code>__len__</code> 魔术方法，支持 <code>len(conv)</code> 返回消息条数。</p>
+      <details>
+        <summary>点击展开完整参考答案</summary>
+        <pre><code># 作业 1：DeepSeekModel 子类
+class DeepSeekModel(BaseLLMModel):
+    def __init__(
+        self,
+        model_name: str = "deepseek-chat",
+        temperature: float = 0.7,
+        reasoning_mode: bool = False,
+    ) -&gt; None:
+        super().__init__(model_name=model_name, temperature=temperature)
+        self.reasoning_mode = reasoning_mode
+
+    def generate(self, messages: list[ChatMessage]) -&gt; ChatMessage:
+        last_msg = self._validate_messages(messages)
+        mode_label = "深度思考" if self.reasoning_mode else "标准对话"
+        reply = f"[DeepSeek:{self.model_name}|temp={self.temperature}|模式={mode_label}] 已完成推理：{last_msg.content}"
+        return ChatMessage(role="assistant", content=reply)
+
+
+# 作业 2：@property max_tokens 校验
+class ModelConfig:
+    def __init__(self, max_tokens: int = 2048) -&gt; None:
+        self.max_tokens = max_tokens
+
+    @property
+    def max_tokens(self) -&gt; int:
+        return self._max_tokens
+
+    @max_tokens.setter
+    def max_tokens(self, value: int) -&gt; None:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise TypeError(f"max_tokens 必须是整数 int，当前为 {type(value).__name__}")
+        if not (1 &lt;= value &lt;= 128000):
+            raise ValueError(f"max_tokens 必须在 1 到 128000 之间，当前值为 {value}")
+        self._max_tokens = value
+
+
+# 作业 3：Conversation.__len__
+class Conversation:
+    def __init__(self) -&gt; None:
+        self._messages: list[ChatMessage] = []
+
+    def add(self, msg: ChatMessage) -&gt; None:
+        if not isinstance(msg, ChatMessage):
+            raise TypeError("只能添加 ChatMessage 对象")
+        self._messages.append(msg)
+
+    def __len__(self) -&gt; int:
+        return len(self._messages)</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
