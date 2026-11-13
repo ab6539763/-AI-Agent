@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 65 | 智枢企业级智能体平台 · 毕业答辩（15分钟演示 + 10分钟企业评委问答）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --purple: #a78bfa;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 22px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+    .sim-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 12px;
+    }
+    @media (max-width: 768px) {
+      .sim-grid { grid-template-columns: 1fr; }
+    }
+    .slider-row {
+      margin-bottom: 12px;
+    }
+    .slider-row label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    .slider-row input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+    .score-box {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      text-align: center;
+    }
+    .score-num {
+      font-size: 46px;
+      font-weight: 800;
+      color: var(--accent);
+      line-height: 1.1;
+    }
+    .grade-pill {
+      margin-top: 10px;
+      padding: 6px 18px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 16px;
+      background: rgba(52, 211, 153, 0.16);
+      color: var(--green);
+      border: 1px solid var(--green);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第六阶段：综合实战与求职冲刺 · Day 65 毕业收官 | 版本 v1.0.0-day65</div>
+      <h1>毕业答辩实战：15 分钟全栈演示 + 10 分钟企业评委硬核问答</h1>
+      <p>项目交付（Issue #065）：星辰数科 · 智枢企业级智能体平台（ZhiShu-Agent）五维度加权评分引擎与 ARB 评委问答模拟器</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从工程交付到技术答辩的最后一公里）：</strong><br />
+      欢迎来到 <strong>Day 65</strong> 毕业答辩日！团队成员（PM 林晓、Tech Lead 张工、工程师 陈默、QA 李婷、DevOps 赵磊）历经 65 天打磨，终于迎来企业级验收。记住：<strong>优秀的工程项目不仅要跑得通，更要在 15 分钟内讲透业务 ROI 与架构权衡，并在 10 分钟评委追问中守住技术底线。</strong>
+    </div>
+
+    <h2>一、答辩评分引擎与 Q&A 模拟架构</h2>
+    <div class="card">
+      <p>系统通过 <code>DefenseRubric</code> 固化五维度加权标准，<code>evaluate_defense()</code> 聚合多位企业评委打分并导出 Markdown 评分卡；<code>JudgeQuestionBank</code> 针对五大生产级难题提供关键词匹配与采分点覆写诊断。</p>
+      <div class="mermaid">
+        flowchart LR
+          P["15分钟演示 + 10分钟Q&A"] --> R["DefenseRubric 五维度加权校验"]
+          R -->|"20% / 30% / 20% / 15% / 15%"| E["evaluate_defense() 评委聚合"]
+          E --> G["评级引擎 S / A / B / C"]
+          G --> M["export_markdown_scorecard() 评分卡"]
+          P -->|"评委追问"| Q["JudgeQuestionBank 题库匹配"]
+          Q -->|"Top-K + 采分点"| S["score_answer() 覆盖率诊断"]
+      </div>
+    </div>
+
+    <h2>二、五维度加权评分标准 &amp; 交互式自测器</h2>
+    <div class="card">
+      <div class="sim-grid">
+        <div>
+          <div class="slider-row">
+            <label><span>业务价值（权重 20%）</span><strong id="val-bv">90</strong></label>
+            <input type="range" id="s-bv" min="50" max="100" value="90" oninput="calcScore()" />
+          </div>
+          <div class="slider-row">
+            <label><span>技术架构与 RAG/Agent 深度（权重 30%）</span><strong id="val-ad">93</strong></label>
+            <input type="range" id="s-ad" min="50" max="100" value="93" oninput="calcScore()" />
+          </div>
+          <div class="slider-row">
+            <label><span>工程质量与可观测性（权重 20%）</span><strong id="val-eq">91</strong></label>
+            <input type="range" id="s-eq" min="50" max="100" value="91" oninput="calcScore()" />
+          </div>
+          <div class="slider-row">
+            <label><span>演示流畅度（权重 15%）</span><strong id="val-df">87</strong></label>
+            <input type="range" id="s-df" min="50" max="100" value="87" oninput="calcScore()" />
+          </div>
+          <div class="slider-row">
+            <label><span>评委问答表现（权重 15%）</span><strong id="val-qa">90</strong></label>
+            <input type="range" id="s-qa" min="50" max="100" value="90" oninput="calcScore()" />
+          </div>
+        </div>
+        <div class="score-box">
+          <div style="color: var(--muted); font-size: 14px;">实时加权总分预览</div>
+          <div class="score-num" id="total-score">90.65</div>
+          <div class="grade-pill" id="grade-pill">S 级（卓越交付）</div>
+          <p style="font-size: 13px; color: var(--muted); margin-top: 14px;">
+            评级规则：S ≥ 90 | A ≥ 80 | B ≥ 70 | C &lt; 70
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <h2>三、15 分钟演示节奏分配（星辰数科标准剧本）</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>时间段</th>
+            <th>主讲角色</th>
+            <th>核心交付内容</th>
+            <th>对应评分维度</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>00:00 - 02:00</code></td>
+            <td>PM 林晓</td>
+            <td>金融/企服痛点切入，量化 ROI（人工审阅耗时下降 75%）</td>
+            <td>业务价值 (20%)</td>
+          </tr>
+          <tr>
+            <td><code>02:00 - 06:00</code></td>
+            <td>Tech Lead 张工</td>
+            <td>混合 RAG (BM25+向量+RRF)、多 Agent 编排与 HITL 状态机架构</td>
+            <td>技术架构深度 (30%)</td>
+          </tr>
+          <tr>
+            <td><code>06:00 - 11:00</code></td>
+            <td>工程师 陈默</td>
+            <td>全栈实时演示：SSE 流式输出、Citation 溯源、Approve/Reject 与 409 防重</td>
+            <td>演示流畅度 (15%)</td>
+          </tr>
+          <tr>
+            <td><code>11:00 - 13:30</code></td>
+            <td>QA 李婷 / DevOps 赵磊</td>
+            <td><code>verify_day.py</code> 自动化门禁、Faithfulness 评测与 Trace 可观测性</td>
+            <td>工程质量 (20%)</td>
+          </tr>
+          <tr>
+            <td><code>13:30 - 15:00</code></td>
+            <td>林晓 / 张工</td>
+            <td>灰度发布计划、多租户成本路由演进与收尾致谢</td>
+            <td>综合商业成熟度</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>四、10 分钟企业评委高频硬核问答（点击展开满分要点）</h2>
+    <div class="card">
+      <details open>
+        <summary>JQ-01 幻觉治理：财报与合规场景如何防止模型胡说八道？</summary>
+        <p><strong>四层防线：</strong>1) BM25 + 向量双路召回与 RRF 重排；2) 强制 Citation 原句锚定；3) 上下文缺失或口径冲突时触发低置信度拒答（Abstention）；4) 接入 Faithfulness ≥ 0.85 自动化上线门禁。</p>
+      </details>
+      <details>
+        <summary>JQ-02 高并发成本：早高峰 500 并发下 Token 成本与 P99 延迟怎么控？</summary>
+        <p><strong>四项优化：</strong>1) 语义缓存（Semantic Cache）拦截 35%-45% 高频重复问答；2) 大小模型分级路由（Router）；3) Chunk 去重与上下文裁剪；4) 网关租户级 Token 桶限流与降级熔断。</p>
+      </details>
+      <details>
+        <summary>JQ-03 权限隔离：共用向量库如何防越权检索与 Prompt 注入？</summary>
+        <p><strong>纵深防御：</strong>1) 文档切片绑定 <code>tenant_id</code> / <code>dept_acl</code>，检索时执行 Pre-filtering 下推过滤（绝不召回后过滤）；2) 输入侧 Prompt 注入拦截；3) PII 入库前脱敏与不可篡改审计日志。</p>
+      </details>
+      <details>
+        <summary>JQ-04 HITL 超时：审批人出差、服务重启或重复点击批准怎么办？</summary>
+        <p><strong>生产可靠性：</strong>1) 审批单持久化至 SQLite/PG 支持重启恢复；2) TTL 超时自动流转 <code>expired</code> 并触发企微/邮件升级转派；3) CAS 状态机仅允许 <code>pending</code> 流转，重复提交返回 <code>409 Conflict</code> 并配合幂等键。</p>
+      </details>
+      <details>
+        <summary>JQ-05 微调 vs RAG 选型：为什么不直接用内部文档微调一个大模型？</summary>
+        <p><strong>核心原则：</strong>RAG 管动态知识（高频更新、强溯源、文档级 ACL 隔离），微调管行为模式（固化 JSON/Tool-Call 格式、领域话术风格与压缩超长 System Prompt）。</p>
+      </details>
+      <details>
+        <summary>查看 Day 65 演练与双校验命令</summary>
+        <pre><code>.venv/bin/python project_iterations/day_65/main.py
+.venv/bin/python scripts/verify_day.py --nb curriculum/stage_06_capstone_and_career/day_65/notebook.ipynb --iter project_iterations/day_65</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+    function calcScore() {
+      const bv = Number(document.getElementById("s-bv").value);
+      const ad = Number(document.getElementById("s-ad").value);
+      const eq = Number(document.getElementById("s-eq").value);
+      const df = Number(document.getElementById("s-df").value);
+      const qa = Number(document.getElementById("s-qa").value);
+      document.getElementById("val-bv").textContent = bv;
+      document.getElementById("val-ad").textContent = ad;
+      document.getElementById("val-eq").textContent = eq;
+      document.getElementById("val-df").textContent = df;
+      document.getElementById("val-qa").textContent = qa;
+      const total = (bv * 0.20 + ad * 0.30 + eq * 0.20 + df * 0.15 + qa * 0.15).toFixed(2);
+      document.getElementById("total-score").textContent = total;
+      const pill = document.getElementById("grade-pill");
+      const num = Number(total);
+      if (num >= 90) {
+        pill.textContent = "S 级（卓越交付）";
+        pill.style.color = "#34d399";
+        pill.style.borderColor = "#34d399";
+      } else if (num >= 80) {
+        pill.textContent = "A 级（优秀通过）";
+        pill.style.color = "#38bdf8";
+        pill.style.borderColor = "#38bdf8";
+      } else if (num >= 70) {
+        pill.textContent = "B 级（达标待优化）";
+        pill.style.color = "#fbbf24";
+        pill.style.borderColor = "#fbbf24";
+      } else {
+        pill.textContent = "C 级（需整改重评）";
+        pill.style.color = "#f87171";
+        pill.style.borderColor = "#f87171";
+      }
+    }
+  </script>
+</body>
+</html>
