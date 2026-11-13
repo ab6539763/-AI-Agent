@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 58 | 智枢企业级智能体平台 · 毕业项目开题选题与技术方案评审</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第六阶段：企业级毕业项目实战与就业指导 · Day 58 | 版本 v1.0.0-day58</div>
+      <h1>毕业项目开题选题与技术方案评审</h1>
+      <p>企业需求驱动（Issue #058）：覆盖 8 大行业赛道的开题 PRD 规范与 RAG / Agent / Guardrails / Deployment 四维自动化评审器</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“学技术”到“交付完整产品”）：</strong><br />
+      恭喜大家正式进入 <strong>Stage 6 毕业项目实战阶段</strong>！过去 57 天我们打造了《智枢企业级智能体平台》的全套技术底座。今天在 <strong>Day 58</strong>，我们将面向 <strong>8 大真实行业赛道</strong> 开展开题立项，使用 <code>capstone_planner.py</code> 对每份技术提案进行四维工程体检，通过后即可进入 1-on-1 导师架构评审与核心编码！
+    </div>
+
+    <h2>一、开题立项与 1-on-1 技术方案评审流水线</h2>
+    <div class="card">
+      <p>每一份毕业项目提案在进入开发前，均需通过 <code>review_proposal()</code> 的四维完整性校验（满分 100 分，四维均无缺失项且总分 ≥ 80 方可获得 <code>APPROVED</code>）。</p>
+      <div class="mermaid">
+        flowchart LR
+          SELECT["选择 8 大行业赛道"] --> PRD["编写 TechnicalProposal"]
+          PRD --> CHECK{"review_proposal() 四维预审"}
+          CHECK -->|"RAG 缺失"| FIX_R["补齐数据源 / 切分 / Embedding"]
+          CHECK -->|"Agent 缺失"| FIX_A["补齐编排框架 / Tools / Memory"]
+          CHECK -->|"Guardrails 缺失"| FIX_G["补齐护栏 / 免责声明 / 评测指标"]
+          CHECK -->|"Deployment 缺失"| FIX_D["补齐 vLLM / Docker / 成本预算"]
+          FIX_R --> PRD
+          FIX_A --> PRD
+          FIX_G --> PRD
+          FIX_D --> PRD
+          CHECK -->|"APPROVED (>=80)"| REVIEW["1-on-1 导师架构评审"]
+          REVIEW --> DEV["进入 Day 59+ 核心开发"]
+      </div>
+    </div>
+
+    <h2>二、8 大行业毕业赛道全景矩阵</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>赛道名称</th>
+            <th>所属领域</th>
+            <th>推荐 RAG 架构</th>
+            <th>核心安全护栏</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>法律咨询助手</strong></td>
+            <td>法律合规</td>
+            <td>法条结构化切分 + 混合检索 + Reranker 溯源</td>
+            <td>禁止伪造法条、附带非正式法律意见免责声明、PII 脱敏</td>
+          </tr>
+          <tr>
+            <td><strong>简历优化Agent</strong></td>
+            <td>人力资源</td>
+            <td>岗位胜任力库 + 高分简历范式库向量检索</td>
+            <td>禁止虚构工作经历、候选人隐私信息脱敏</td>
+          </tr>
+          <tr>
+            <td><strong>电商智能客服</strong></td>
+            <td>新零售</td>
+            <td>SKU 商品库 + 平台售后规则库混合检索</td>
+            <td>严禁越权承诺赔付、高风险工单自动转人工</td>
+          </tr>
+          <tr>
+            <td><strong>论文阅读助手</strong></td>
+            <td>科研学术</td>
+            <td>按章节分层父子索引 + 引用图谱检索</td>
+            <td>区分原文结论与推测、强制标注页码出处</td>
+          </tr>
+          <tr>
+            <td><strong>旅行规划Agent</strong></td>
+            <td>文旅出行</td>
+            <td>城市攻略库 + 景点开放时间与交通知识库</td>
+            <td>实时票务以工具为准、行程时间冲突硬校验</td>
+          </tr>
+          <tr>
+            <td><strong>企业财报分析系统</strong></td>
+            <td>金融投研</td>
+            <td>财报表格 Markdown/JSON 解析 + 指标口径词典</td>
+            <td>数值计算强制交由 Python 工具、非投资建议声明</td>
+          </tr>
+          <tr>
+            <td><strong>教育答疑系统</strong></td>
+            <td>智慧教育</td>
+            <td>教材知识点图谱 + 真题解析库检索</td>
+            <td>苏格拉底式启发引导（禁直接给作业答案）</td>
+          </tr>
+          <tr>
+            <td><strong>医疗健康科普助手</strong></td>
+            <td>大健康科普</td>
+            <td>权威医学指南高可信知识库 + 严格溯源</td>
+            <td>严禁下达诊断或开方、急重症红旗症状立即提示就医</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、四维评审标准与实战演练</h2>
+    <div class="card">
+      <p>详细课后设计题与参考答案请查阅 <a href="docs/homework_and_answers.md" style="color: var(--accent);">homework_and_answers.md</a>。</p>
+      <details>
+        <summary>评审规则 1：为什么四维中任意一项缺失都无法获得 APPROVED？</summary>
+        <p>企业级 AI 应用是典型的“木桶效应”系统：RAG 决定知识下限，Agent 决定任务上限，Guardrails 决定安全与合规底线，Deployment 决定能否稳定上线。任一维度为 0 都会导致项目停留在玩具 Demo 阶段。</p>
+      </details>
+      <details>
+        <summary>点击查看：Day 58 校验与运行命令</summary>
+        <pre><code>.venv/bin/python project_iterations/day_58/main.py
+.venv/bin/python scripts/verify_day.py --nb curriculum/stage_06_capstone_and_career/day_58/notebook.ipynb --iter project_iterations/day_58</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
