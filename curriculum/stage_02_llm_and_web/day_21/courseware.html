@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 21 | 智枢企业级智能体平台 · Week 3 综合测评与集成迷你项目</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第二阶段：大模型与 Web 工程 · Day 21 | 版本 v0.2.0-day21</div>
+      <h1>Week 3 综合测评与集成迷你项目（多轮记忆 + 工具调用 + 流式输出）</h1>
+      <p>企业需求驱动（Issue #021）：将多轮上下文记忆、Pure-API Function Calling 与 SSE 生成器流式输出合为一体，完成第三周技术验收</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（第三周收官）：</strong><br />
+      过去一周我们逐个击破了 Token 成本、SSE 流式传输、Prompt 防注入、Function Calling 以及 Embedding 向量检索。今天，产品经理林晓和 Tech Lead 张工要求我们把“大脑（多轮记忆）”、“手脚（<code>get_weather</code> / <code>calculate_math</code> 工具）”与“实时声带（<code>stream_reply</code> 生成器流式输出）”组装进同一个 <code>IntegratedAgent</code> 引擎，并通过 10 道测评题 + 2 道编程题检验工程内功！
+    </div>
+
+    <h2>一、Week 3 综合集成架构（Multi-turn + Tool Calling + Streaming）</h2>
+    <div class="card">
+      <p>为了兼顾工具参数解析的可靠性与用户交互的实时性，<code>IntegratedAgent.stream_reply()</code> 采用<strong>两阶段协同架构</strong>：</p>
+      <div class="mermaid">
+        flowchart TD
+          U["用户输入"] --> CP["记录事务 checkpoint 并追加 role=user"]
+          CP --> R1["阶段一：工具决策循环 (stream=False, tools=...)"]
+          R1 -->|"返回 tool_calls"| EX["ToolRegistry.dispatch() 执行本地工具"]
+          EX --> R1
+          R1 -->|"无 tool_calls"| ST["阶段二：SSE 流式输出 (stream=True)"]
+          ST --> Y["iter_lines() + parse_sse_line() 逐块 yield"]
+          Y --> SV["追加完整 assistant 消息并更新统计"]
+          R1 -.->|"异常 / 超限"| RB["del messages[checkpoint:] 事务回滚"]
+          ST -.->|"HTTP 异常"| RB
+      </div>
+    </div>
+
+    <h2>二、核心工程模块与 Week 3 知识图谱</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>能力模块</th><th>核心类 / 函数</th><th>工程设计要点</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>多轮上下文记忆</td><td><code>IntegratedAgent.messages</code> / <code>clear_history()</code></td><td>保留 <code>System Prompt</code>，支持异常时按 <code>checkpoint</code> 事务回滚</td></tr>
+          <tr><td>安全工具调用</td><td><code>ToolRegistry</code> / <code>safe_calculate_math()</code></td><td>AST 白名单求值严禁 <code>eval()</code>，未知工具与畸形 JSON 优雅降级</td></tr>
+          <tr><td>生成器流式输出</td><td><code>stream_reply()</code> / <code>parse_sse_line()</code></td><td><code>yield</code> 增量文本块，流结束后写回完整 <code>assistant</code> 消息</td></tr>
+          <tr><td>全离线确定性测试</td><td><code>create_integrated_mock_transport()</code></td><td>无 API Key 时自动启用 <code>httpx.MockTransport</code> 模拟多轮、工具与 SSE</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、Week 3 综合测评指南与本地验收</h2>
+    <div class="card">
+      <p>完整 10 道选择题 + 2 道编程题及参考解析已归档于 <code>curriculum/stage_02_llm_and_web/day_21/docs/weekly_quiz_and_answers.md</code>。</p>
+      <pre><code># 1. 运行 Day 21 多轮记忆 + 工具调用 + 流式输出综合演示
+.venv/bin/python project_iterations/day_21/main.py
+
+# 2. 一键执行 Day 21 Notebook 与 8 项 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_02_llm_and_web/day_21/notebook.ipynb \
+  --iter project_iterations/day_21</code></pre>
+      <details>
+        <summary>点击查看：为什么工具决策阶段用非流式，最终回复阶段才用 SSE 流式？</summary>
+        <p>在工具决策阶段，模型输出的是结构化 JSON 参数（<code>tool_calls</code>），必须等 JSON 完整接收后才能反序列化并执行本地函数，流式分片无法提前触发执行；而在工具结果已收集完毕、进入最终自然语言总结阶段时开启 <code>stream=True</code>，既保证了工具调用零解析错误，又能让用户第一时间看到逐字吐出的回复。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default' });</script>
+</body>
+</html>
