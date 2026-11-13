@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 01 | 智枢企业级智能体平台 · 开发环境与第一行代码</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 1 周 · Day 01 | 版本 v0.1.0-day01</div>
+      <h1>开发环境与第一行代码：智枢平台数字名片初始化</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》研发启动日 —— 团队环境对齐、GitLab 协作流建立与员工数字名片 CLI 落地</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      各位同学好，从今天起，你不再是一个孤立背语法的初学者，而是正式加入“星辰数科 AI 研发部”的工程师 <strong>陈默</strong>。未来 70 天，我们要把一个企业级 Agent 平台从 0 行代码一步步迭代到可商用上线。第一天最容易被忽视，但却是工程团队的命脉：<strong>环境一致 + 代码可追溯</strong>。今天上午我们先看清大模型行业全景，配好国内镜像源；下午用 4 个基础数据类型写出平台的第一块砖——<code>zhishu_agent/profile.py</code>；晚上完成第一次 Git 提交！
+    </div>
+
+    <h2>一、上午：大模型行业全景与企业技术栈选型</h2>
+    <div class="card">
+      <p>在实际企业招聘中，<strong>大模型应用开发工程师</strong>（区别于底层预训练算法研究员）的核心竞争力在于“把模型能力工程化落地到业务中”。我们的 70 天技术演进路线如下：</p>
+      <div class="mermaid">
+        flowchart LR
+          S1["第1-14天<br/>Python工程基础<br/>(HTTP/JSON/面向对象)"] --> S2["第15-24天<br/>Prompt工程与Web<br/>(FastAPI/SSE/Tool)"]
+          S2 --> S3["第25-38天<br/>RAG企业知识库<br/>(LangChain/Chroma/Rerank)"]
+          S3 --> S4["第39-50天<br/>多Agent智能体<br/>(LangGraph/MCP/SQL)"]
+          S4 --> S5["第51-60天<br/>微调与私有化部署<br/>(LoRA/vLLM/Docker)"]
+          S5 --> S6["第58-70天<br/>毕业设计与面试冲刺"]
+      </div>
+    </div>
+
+    <h2>二、上午实操：Python 3.10+、VS Code 与国内镜像源配置</h2>
+    <div class="card">
+      <p>国内访问海外 PyPI 官方源经常超时，进公司第一件事就是把 pip 源切换为清华大学或阿里云镜像：</p>
+      <pre><code># 1. 验证 Python 版本（要求 3.10 及以上）
+python --version
+
+# 2. 全局配置清华 PyPI 镜像源（一劳永逸解决下载慢）
+pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 3. 安装 VS Code 推荐插件：
+#    - Python (Microsoft)
+#    - Jupyter (Microsoft)
+#    - GitLens (查看团队每一行代码提交历史)</code></pre>
+    </div>
+
+    <h2>三、下午：企业需求 PRD 与系统架构设计</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #001（产品经理 林晓 提出）：</strong>新成员入职智枢平台时，需要一个命令行自检与数字名片工具，打印 Python 环境信息并采集姓名、岗位、工龄、预算、API 权限状态。</p>
+      <div class="mermaid">
+        flowchart TD
+          U["终端用户 (CLI)"] -->|input 录入| P["类型转换与校验<br/>str / int / float / bool"]
+          E["环境探测<br/>platform.python_version()"] --> R["名片渲染引擎<br/>build_employee_card()"]
+          P --> R
+          R -->|print 格式化输出| U
+      </div>
+    </div>
+
+    <h2>四、下午实操：核心代码逐行解析（可直接粘贴运行）</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_01/zhishu_agent/profile.py</code>：</p>
+      <pre><code>import platform
+import sys
+
+def get_environment_info() -&gt; dict[str, str]:
+    """获取当前 Python 开发环境信息，用于新员工入职环境自检。"""
+    return {
+        "python_version": platform.python_version(),
+        "os_info": f"{platform.system()} {platform.release()}",
+        "executable": sys.executable,
+    }
+
+def build_employee_card(
+    name: str,
+    role: str,
+    years_exp: int,
+    hourly_cost: float,
+    llm_enabled: bool,
+) -&gt; str:
+    """根据基本数据类型生成格式化的企业数字名片。"""
+    # 三元表达式：将布尔值转为中文友好的状态
+    status_label = "已开通 [OK]" if llm_enabled else "未开通 [LOCKED]"
+    border = "=" * 46
+    lines = [
+        border,
+        "   星辰数科 · 智枢平台数字名片 (v0.1.0-day01)",
+        border,
+        f"姓名 / 标识 : {name}",
+        f"所属岗位    : {role}",
+        f"工程经验    : {years_exp} 年",
+        f"资源预算    : ¥{hourly_cost:.2f} / 小时",
+        f"大模型权限  : {status_label}",
+        border,
+    ]
+    return "\n".join(lines)
+
+if __name__ == "__main__":
+    env = get_environment_info()
+    print(f"[环境自检] Python {env['python_version']} | 系统: {env['os_info']}")
+    print(build_employee_card("陈默", "AI应用开发工程师", 2, 12.5, True))</code></pre>
+    </div>
+
+    <h2>五、课堂笔记：今日核心知识速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>知识点</th><th>Python 语法</th><th>在大模型/Agent 中的真实用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>字符串 <code>str</code></td><td><code>"deepseek-chat"</code></td><td>存放 Prompt 提示词、模型名称、对话内容</td></tr>
+          <tr><td>整数 <code>int</code></td><td><code>2048</code></td><td>控制 <code>max_tokens</code>、对话轮数、分页大小</td></tr>
+          <tr><td>浮点数 <code>float</code></td><td><code>0.7</code></td><td>调节 <code>temperature</code>、计算 API 费用账单</td></tr>
+          <tr><td>布尔值 <code>bool</code></td><td><code>True / False</code></td><td>控制 <code>stream</code> 流式开关、工具调用权限</td></tr>
+          <tr><td>类型转换</td><td><code>int("10")</code> / <code>float("0.7")</code></td><td>将用户文本输入或环境变量转为数值配置</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>六、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1：</strong>定义代表模型名、最大 Token、采样温度、流式开关的 4 个变量，并用 <code>type()</code> 打印其类型。</p>
+      <p><strong>作业 2：</strong>编写 API 成本估算器，输入 Token 按 1 元/百万、输出 Token 按 2 元/百万计算总费用（保留 4 位小数）。</p>
+      <details>
+        <summary>点击展开完整参考答案</summary>
+        <pre><code># 作业 1 参考答案
+model_name = "deepseek-chat"
+max_tokens = 2048
+temperature = 0.7
+is_stream = True
+print(type(model_name), type(max_tokens), type(temperature), type(is_stream))
+
+# 作业 2 参考答案
+in_tokens = int(input("输入 Token 数: "))
+out_tokens = int(input("输出 Token 数: "))
+cost = (in_tokens / 1_000_000) * 1.0 + (out_tokens / 1_000_000) * 2.0
+print(f"预估总费用: ¥{cost:.4f}")</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
