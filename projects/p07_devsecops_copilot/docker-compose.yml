@@ -1,0 +1,23 @@
+services:
+  devsecops-copilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p07-devsecops-copilot
+    ports:
+      - "${P07_PORT:-8080}:8080"
+    environment:
+      - P07_HOST=0.0.0.0
+      - P07_PORT=8080
+      - P07_WIKI_DIR=/data/wiki
+    volumes:
+      - p07_wiki_data:/data/wiki
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  p07_wiki_data:

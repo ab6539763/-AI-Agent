@@ -1,0 +1,25 @@
+services:
+  p05-retail-supply:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p05-retail-supply
+    ports:
+      - "8005:8005"
+    env_file:
+      - .env.example
+    environment:
+      - P05_DATA_DIR=/app/data
+      - P05_PORT=8005
+    volumes:
+      - p05_wiki_data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  p05_wiki_data:

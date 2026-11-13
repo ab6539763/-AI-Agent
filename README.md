@@ -53,3 +53,20 @@ uv pip install pytest nbformat jupyter_client ipykernel fastapi uvicorn httpx py
 # 3. 运行指定天数的单元测试（例如 Day 01）
 pytest project_iterations/day_01/tests -v
 ```
+
+---
+
+## 4. 七大行业生产级项目（PMP 0-to-1 × Ontology × LLM Wiki × FDE）
+
+在 70 天课程体系基础上，[`docs/PMP_ONTOLOGY_LLMWIKI_FDE_FRAMEWORK.md`](docs/PMP_ONTOLOGY_LLMWIKI_FDE_FRAMEWORK.md) 定义了融合 **PMP 全生命周期、Ontology 企业本体设计、LLM Wiki 活体知识库与 FDE 前线部署工程** 的生产交付标准，并在 `projects/` 下落地了 7 个可直接容器化部署的行业项目：
+
+| 编号 | 行业场景 | 目录 | 一键测试 |
+| :--- | :--- | :--- | :--- |
+| **P01** | 金融投研与合规风控 | `projects/p01_fintech_research` | `pytest projects/p01_fintech_research/tests -v` |
+| **P02** | 医疗健康与临床辅助决策 | `projects/p02_healthcare_copilot` | `pytest projects/p02_healthcare_copilot/tests -v` |
+| **P03** | 法律合规与合同审查 | `projects/p03_legal_contract` | `pytest projects/p03_legal_contract/tests -v` |
+| **P04** | 智能制造与工业设备运维 | `projects/p04_manufacturing_ops` | `pytest projects/p04_manufacturing_ops/tests -v` |
+| **P05** | 零售电商与供应链增长 | `projects/p05_retail_supply` | `pytest projects/p05_retail_supply/tests -v` |
+| **P06** | 政务服务与企业政策通 | `projects/p06_govtech_policy` | `pytest projects/p06_govtech_policy/tests -v` |
+| **P07** | 研发效能与 DevSecOps | `projects/p07_devsecops_copilot` | `pytest projects/p07_devsecops_copilot/tests -v` |
+

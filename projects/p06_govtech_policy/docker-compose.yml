@@ -1,0 +1,25 @@
+services:
+  p06-govtech-policy:
+    build:
+      context: ../..
+      dockerfile: projects/p06_govtech_policy/Dockerfile
+    container_name: p06-govtech-policy
+    ports:
+      - "${GOVTECH_PORT:-8006}:8006"
+    environment:
+      GOVTECH_HOST: "0.0.0.0"
+      GOVTECH_PORT: "8006"
+      GOVTECH_LOG_LEVEL: "${GOVTECH_LOG_LEVEL:-info}"
+      GOVTECH_DATA_DIR: "/app/data"
+    volumes:
+      - govtech_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  govtech_data:

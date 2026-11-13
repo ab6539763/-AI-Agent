@@ -1,0 +1,27 @@
+services:
+  healthcare-copilot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p02-healthcare-copilot
+    ports:
+      - "${P02_PORT:-8000}:8000"
+    env_file:
+      - .env.example
+    environment:
+      P02_HOST: "0.0.0.0"
+      P02_PORT: "8000"
+      P02_WIKI_DIR: "/app/data/wiki"
+      P02_AUDIT_LOG_PATH: "/app/data/audit.jsonl"
+    volumes:
+      - p02_clinical_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  p02_clinical_data:

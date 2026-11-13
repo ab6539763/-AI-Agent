@@ -1,0 +1,26 @@
+services:
+  fintech-research-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: p01-fintech-research-agent
+    ports:
+      - "${P01_PORT:-8000}:8000"
+    env_file:
+      - .env.example
+    environment:
+      - P01_DATA_DIR=/app/data
+      - P01_HOST=0.0.0.0
+      - P01_PORT=8000
+    volumes:
+      - p01_wiki_data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health').read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  p01_wiki_data:
