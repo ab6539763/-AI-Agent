@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 43 | 智枢企业级智能体平台 · 多智能体协作系统（Supervisor 模式）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：智能体开发与多智能体编排 · Day 43 | 版本 v0.4.0-day43</div>
+      <h1>多智能体协作系统：Supervisor 模式（Researcher + Analyst + Writer）</h1>
+      <p>企业需求驱动（Issue #043）：构建职责清晰、交接可审计且具备 max_rounds 防死循环熔断的企业级多智能体研报团队</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“全能单兵”到“专职协同团队”）：</strong><br />
+      当单一 Agent 同时承担检索、分析与撰稿时，系统提示词会迅速膨胀，工具调用准确率随之下降。Day 43 我们将引入企业级 <strong>Supervisor-Worker 多智能体架构</strong>：由 <strong>ResearcherAgent</strong> 专注检索事实，<strong>AnalystAgent</strong> 专注洞察与风险评估，<strong>WriterAgent</strong> 专注结构化报告撰写，并由 <strong>SupervisorOrchestrator</strong> 集中统筹任务路由、记录 <code>agent_handoffs</code> 审计轨迹及执行 <code>max_rounds</code> 熔断保护。
+    </div>
+
+    <h2>一、Supervisor 多智能体协作架构</h2>
+    <div class="card">
+      <div class="mermaid">
+flowchart TD
+    USER(["用户输入: 研究主题 topic"]) --> SUP["SupervisorOrchestrator&lt;br/&gt;(任务路由 · 交接审计 · max_rounds 熔断)"]
+    SUP &lt;--&gt;|"1. 下发调研指令 / 返回 findings"| RES["ResearcherAgent&lt;br/&gt;(信息调研员)"]
+    SUP &lt;--&gt;|"2. 下发分析指令 / 返回 insights &amp; risks"| ANA["AnalystAgent&lt;br/&gt;(数据分析师)"]
+    SUP &lt;--&gt;|"3. 下发撰稿指令 / 返回 report"| WRI["WriterAgent&lt;br/&gt;(报告撰稿人)"]
+    SUP --&gt;|"4. 路由至 FINISH 或触发 max_rounds"| OUT(["输出 OrchestrationResult&lt;br/&gt;(final_report + agent_handoffs)"])
+      </div>
+      <table>
+        <thead>
+          <tr><th>核心组件</th><th>职责定位</th><th>产出 Artifacts</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>AgentWorker</code></td><td>专职智能体抽象基类，定义统一 <code>execute(task, context)</code> 契约</td><td><code>WorkerResult</code></td></tr>
+          <tr><td><code>ResearcherAgent</code></td><td>围绕研究主题检索背景资料、行业动态与核心事实</td><td><code>findings</code></td></tr>
+          <tr><td><code>AnalystAgent</code></td><td>对调研事实进行结构化对比、量化指标与风险评估</td><td><code>insights</code>, <code>risks</code>, <code>metrics</code></td></tr>
+          <tr><td><code>WriterAgent</code></td><td>汇总调研与分析成果，撰写可直接交付的 Markdown 研报</td><td><code>report</code></td></tr>
+          <tr><td><code>SupervisorOrchestrator</code></td><td>中央调度、路由决策、<code>agent_handoffs</code> 追踪与 <code>max_rounds</code> 熔断</td><td><code>OrchestrationResult</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>二、Supervisor vs Peer-to-Peer 架构权衡</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>评估维度</th><th>Supervisor 模式（本课实现）</th><th>Peer-to-Peer 网状模式</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>扩展复杂度</td><td>O(N) 线性增长，Worker 之间解耦</td><td>O(N²) 交互边膨胀，Prompt 易失控</td></tr>
+          <tr><td>死循环防护</td><td>集中维护 <code>max_rounds</code>，单点精准熔断</td><td>缺乏全局视角，易产生隐蔽环形交接</td></tr>
+          <tr><td>审计可观测性</td><td>天然沉淀完整 <code>agent_handoffs</code> 轨迹</td><td>需要额外分布式追踪总线还原链路</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战</h2>
+    <div class="card">
+      <h3>1. 启动默认 Supervisor 多智能体团队</h3>
+      <pre><code>from zhishu_agent import SupervisorOrchestrator
+
+orchestrator = SupervisorOrchestrator(max_rounds=6)
+result = orchestrator.run("企业级多智能体系统的 Supervisor 编排与防死循环治理")
+
+print("执行状态:", result.status, "| 使用轮次:", result.rounds_used)
+for rec in result.agent_handoffs:
+    print(f"Round {rec.round_num}: {rec.from_agent} -&gt; {rec.to_agent}")</code></pre>
+
+      <h3>2. 自定义路由与 <code>max_rounds</code> 熔断防护</h3>
+      <pre><code>def cyclic_router(ctx, handoffs, available):
+    target = "analyst" if len(handoffs) % 2 == 1 else "researcher"
+    return target, "补充调研与分析"
+
+guarded = SupervisorOrchestrator(max_rounds=4, router_fn=cyclic_router)
+res = guarded.run("死循环熔断测试")
+assert res.status == "max_rounds_reached"</code></pre>
+    </div>
+
+    <h2>四、课后实战作业（点击展开参考答案）</h2>
+    <div class="card">
+      <p><strong>作业 1：</strong> 对比 Supervisor 与 Peer-to-Peer 在扩展性、死循环防护和审计可观测性上的差异，给出企业选型结论。</p>
+      <details>
+        <summary>查看参考答案要点</summary>
+        <p>企业级强流程、高合规场景优先选择 <strong>Supervisor 模式</strong>：路由复杂度 O(N)、可由中央节点统一执行 <code>max_rounds</code> 熔断，并天然产出 <code>agent_handoffs</code> 审计日志。</p>
+      </details>
+
+      <p><strong>作业 2：</strong> 编写一个在 <code>researcher</code> 与 <code>analyst</code> 间无限乒乓切换的 <code>router_fn</code>，验证 <code>max_rounds=4</code> 能够强制熔断并返回 <code>status="max_rounds_reached"</code>。</p>
+      <details>
+        <summary>查看参考答案代码</summary>
+        <pre><code>orchestrator = SupervisorOrchestrator(
+    max_rounds=4,
+    router_fn=lambda ctx, h, avail: ("analyst" if len(h) % 2 else "researcher", "循环测试"),
+)
+res = orchestrator.run("高并发架构复盘")
+assert res.status == "max_rounds_reached" and res.rounds_used == 4</code></pre>
+      </details>
+
+      <p><strong>作业 3：</strong> 继承 <code>AgentWorker</code> 新增 <code>ReviewerAgent</code>，构建四阶段（Researcher → Analyst → Writer → Reviewer）质量门禁流。</p>
+      <details>
+        <summary>查看参考答案思路</summary>
+        <p>实现 <code>ReviewerAgent.execute()</code> 校验 <code>context["report"]</code> 是否包含必要章节并写入 <code>review_approved</code>；在自定义 <code>router_fn</code> 中增加对 <code>"review_approved" not in ctx</code> 的判断即可平滑接入。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
