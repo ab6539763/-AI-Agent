@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 19 | 智枢企业级智能体平台 · Pure-API Function Calling 引擎</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第二阶段：大模型与 Web 工程 · Day 19 | 版本 v0.2.0-day19</div>
+      <h1>Function Calling / Tool Use（Pure API，零框架手写引擎）</h1>
+      <p>企业需求驱动（Issue #019）：不依赖 LangChain 与官方 SDK，用原生 <code>httpx</code> 协议手写大模型两轮工具调用闭环与 AST 安全求值器</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（破除黑盒）：</strong><br />
+      很多同学以为 Function Calling 是“大模型在云端替我们执行了 Python 函数”——这是一个常见的误解！事实上，大模型<strong>永远不会直接执行你的本地代码</strong>。它只负责根据你提供的 JSON Schema，在 Round 1 返回一段结构化的意图声明（<code>tool_calls</code>）；真正执行函数、查询数据库、再把结果通过 <code>role="tool"</code> 回传给模型的，是我们自己的 <code>ToolCallingAgentLoop</code> 引擎。今天，我们就用纯 API 把这套协议彻底打通！
+    </div>
+
+    <h2>一、Pure-API Function Calling 两轮交互协议</h2>
+    <div class="card">
+      <p>在标准 OpenAI <code>/v1/chat/completions</code> 协议中，一次完整的工具调用通常包含 <strong>2 轮 HTTP 请求</strong>：</p>
+      <div class="mermaid">
+        sequenceDiagram
+          actor User as 用户
+          participant Loop as ToolCallingAgentLoop
+          participant LLM as OpenAI API / MockTransport
+          participant Reg as ToolRegistry (本地执行)
+
+          User->>Loop: run("查北京天气并计算 (120+80)*3/4")
+          Loop->>LLM: Round 1 POST /chat/completions (含 tools Schema)
+          LLM-->>Loop: assistant message (finish_reason="tool_calls")
+          Loop->>Reg: dispatch("get_weather", ...) & dispatch("calculate_math", ...)
+          Reg-->>Loop: 返回 JSON 字符串结果
+          Loop->>LLM: Round 2 POST /chat/completions (追加 assistant + role="tool")
+          LLM-->>Loop: assistant message (finish_reason="stop", 最终自然语言回复)
+          Loop-->>User: 返回 AgentRunResult
+      </div>
+    </div>
+
+    <h2>二、企业工具集与安全工程规范</h2>
+    <div class="card">
+      <h3>1. 预置企业工具矩阵</h3>
+      <table>
+        <thead>
+          <tr><th>工具名称</th><th>业务用途</th><th>核心参数</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>get_weather</code></td><td>查询城市实时天气</td><td><code>city</code>（必填）、<code>unit</code>（<code>celsius</code> / <code>fahrenheit</code>）</td></tr>
+          <tr><td><code>calculate_math</code></td><td>安全数学表达式求值</td><td><code>expression</code>（必填，仅允许算术 AST 节点）</td></tr>
+          <tr><td><code>query_employee_info</code></td><td>查询星辰数科员工通讯录</td><td><code>employee_id</code> 或 <code>name</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>2. 安全红线：为什么严禁 <code>eval()</code>？</h3>
+      <p>如果直接把大模型生成的字符串传给 Python 的 <code>eval(expression)</code>，一旦遭遇 Prompt 注入（如 <code>__import__('os').system('rm -rf /')</code>），服务器将直接沦陷。因此我们必须使用 <code>ast.parse(..., mode="eval")</code> 白名单求值器：</p>
+      <pre><code>def _eval_ast_node(node: ast.AST) -> int | float:
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+            raise ValueError("不允许的常量类型")
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINARY_OPS:
+        return _BINARY_OPS[type(node.op)](_eval_ast_node(node.left), _eval_ast_node(node.right))
+    raise ValueError(f"检测到不安全的表达式语法节点: {type(node).__name__}")</code></pre>
+    </div>
+
+    <h2>三、本地启动与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 19 Pure-API Function Calling 多场景演示
+.venv/bin/python project_iterations/day_19/main.py
+
+# 2. 一键执行 Day 19 Notebook 与 17 项 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_02_llm_and_web/day_19/notebook.ipynb \
+  --iter project_iterations/day_19</code></pre>
+      <details>
+        <summary>点击查看：遇到模型幻觉出未知工具名怎么办？</summary>
+        <p><code>ToolRegistry.dispatch()</code> 不会直接抛出 <code>KeyError</code> 崩溃，而是返回 <code>{"error": "未知工具: ...", "available_tools": [...]}</code> 作为 <code>role="tool"</code> 的内容回传给模型，既保持了 <code>tool_call_id</code> 配对完整性，又让模型有机会在 Round 2 自我纠错。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
