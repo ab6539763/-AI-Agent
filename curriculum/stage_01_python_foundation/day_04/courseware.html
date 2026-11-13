@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 04 | 智枢企业级智能体平台 · 容器数据结构与任务队列</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 1 周 · Day 04 | 版本 v0.1.0-day04</div>
+      <h1>容器数据结构实战：任务队列 (list)、模型配置 (tuple) 与标签去重 (set)</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》任务调度升级 —— 落地 TodoManager 队列、不可变大模型白名单与 RAG 标签去重引擎</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      大家好，我是 Tech Lead 张工。今天是研发第 4 天，我们的智枢平台已经有了数字名片（Day 01）、Prompt 脱敏器（Day 02）和功能路由（Day 03）。产品经理林晓今天提了 <strong>Issue #004</strong>：智能体需要能管理一串待办任务，并且要锁定公司允许调用的大模型白名单，同时为未来的 RAG 知识库标签做去重。这三个需求刚好对应 Python 最核心的三大容器：<code>list</code>、<code>tuple</code> 和 <code>set</code>。选对容器，代码少一半 Bug！
+    </div>
+
+    <h2>一、上午：三大容器的工程选型与对比</h2>
+    <div class="card">
+      <p>在企业级后端与 Agent 开发中，什么时候用 <code>list</code>，什么时候用 <code>tuple</code> 或 <code>set</code>，不是凭感觉，而是由<strong>可变性、有序性与唯一性</strong>决定的：</p>
+      <table>
+        <thead>
+          <tr><th>容器类型</th><th>语法示例</th><th>核心特性</th><th>在智枢平台中的真实用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>列表 <code>list</code></td><td><code>[task1, task2]</code></td><td>有序、可变、允许重复</td><td>Agent 待办任务队列、对话历史消息列表、Top-K 切片</td></tr>
+          <tr><td>元组 <code>tuple</code></td><td><code>("deepseek-chat", "qwen-max")</code></td><td>有序、<strong>不可变</strong></td><td>系统受支持大模型白名单、只读配置项、多返回值解包</td></tr>
+          <tr><td>集合 <code>set</code></td><td><code>{"RAG", "Python"}</code></td><td>无序、<strong>自动去重</strong></td><td>多路 RAG 标签合并去重（<code>|</code>）、共同命中分析（<code>&amp;</code>）</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>二、下午：企业需求 PRD 与系统架构设计</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #004（产品经理 林晓 提出）：</strong>在 <code>zhishu_agent/task_queue.py</code> 中实现 <code>TodoManager</code> 任务队列、<code>SUPPORTED_MODELS</code> 不可变白名单以及 <code>merge_unique_tags</code> 标签去重函数。</p>
+      <div class="mermaid">
+        flowchart TD
+          U["调度入口 (main.py)"] --> R["路由调度器 (router.py)<br/>route_command()"]
+          R -->|1: 名片| P["身份名片 (profile.py)"]
+          R -->|2: 脱敏| S["Prompt 清洗 (sanitizer.py)"]
+          R -->|3: 任务队列| TQ["任务队列管理器 (task_queue.py)<br/>TodoManager (list/推导式/切片)"]
+          R -->|4: 模型配置| CFG["不可变白名单 (tuple)<br/>SUPPORTED_MODELS"]
+          TQ -->|标签协同| TAG["集合去重引擎 (set)<br/>merge_unique_tags()"]
+      </div>
+    </div>
+
+    <h2>三、下午实操：核心代码逐行解析（可直接粘贴运行）</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_04/zhishu_agent/task_queue.py</code> 核心片段：</p>
+      <pre><code># 1. 不可变元组：锁定系统受支持的大模型白名单
+SUPPORTED_MODELS: tuple[str, ...] = (
+    "deepseek-chat",
+    "deepseek-reasoner",
+    "qwen-max",
+    "qwen-plus",
+    "glm-4-plus",
+)
+
+# 2. 集合去重与交集：处理多路 RAG 检索标签
+def merge_unique_tags(tags_a: list[str], tags_b: list[str]) -&gt; set[str]:
+    set_a = {tag.strip() for tag in tags_a if tag.strip()}
+    set_b = {tag.strip() for tag in tags_b if tag.strip()}
+    return set_a | set_b
+
+# 3. 列表任务队列：列表推导式筛选 + 切片 Top-K
+class TodoManager:
+    def __init__(self) -&gt; None:
+        self._tasks: list[dict] = []
+
+    def add_task(self, title: str, priority: str = "normal") -&gt; dict:
+        task = {"title": title.strip(), "priority": priority, "done": False}
+        self._tasks.append(task)
+        return task
+
+    def complete_task(self, title: str) -&gt; bool:
+        for task in self._tasks:
+            if task["title"] == title.strip():
+                task["done"] = True
+                return True
+        return False
+
+    def get_pending_tasks(self) -&gt; list[dict]:
+        # 列表推导式：过滤所有未完成任务
+        return [t for t in self._tasks if not t["done"]]
+
+    def top_k_tasks(self, k: int) -&gt; list[dict]:
+        # 列表切片：提取前 k 个任务
+        return self._tasks[:k] if k &gt; 0 else []
+
+if __name__ == "__main__":
+    manager = TodoManager()
+    manager.add_task("配置向量库", priority="high")
+    manager.add_task("清洗工单 Prompt", priority="normal")
+    manager.complete_task("清洗工单 Prompt")
+    print("待办任务:", [t["title"] for t in manager.get_pending_tasks()])
+    print("Top-1:", [t["title"] for t in manager.top_k_tasks(1)])
+    print("标签去重:", sorted(merge_unique_tags(["RAG", "Python"], ["Python", "Agent"])))</code></pre>
+    </div>
+
+    <h2>四、课堂笔记：今日高频语法速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>高频技巧</th><th>写法示例</th><th>工程注意事项</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>列表推导式</td><td><code>[t for t in tasks if not t["done"]]</code></td><td>比写 4 行 <code>for + append</code> 更简洁、执行更快</td></tr>
+          <tr><td>列表切片</td><td><code>tasks[:k]</code></td><td>需防备 <code>k &lt;= 0</code> 传入负数导致反向切片</td></tr>
+          <tr><td>元组解包</td><td><code>name, *_, temp = endpoint</code></td><td>用 <code>*_</code> 忽略不需要的中间字段</td></tr>
+          <tr><td>集合运算</td><td><code>set_a | set_b</code> / <code>set_a &amp; set_b</code></td><td>注意 <code>{}</code> 创建的是空字典，空集合必须写 <code>set()</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>五、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1（列表推导式）：</strong>从任务字典列表中，用一行列表推导式筛选出所有未完成且优先级为 <code>"high"</code> 的任务标题。</p>
+      <p><strong>作业 2（元组解包）：</strong>将 <code>("deepseek-chat", "https://api.deepseek.com/v1", 4096, 0.7)</code> 解包，并用 <code>*_</code> 只提取首尾两项。</p>
+      <p><strong>作业 3（集合运算）：</strong>对 <code>vector_tags</code> 和 <code>bm25_tags</code> 分别计算并集（去重）、交集（共同命中）与差集（仅向量命中）。</p>
+      <details>
+        <summary>点击展开完整参考答案</summary>
+        <pre><code># 作业 1 参考答案
+high_titles = [t["title"] for t in tasks if not t["done"] and t["priority"] == "high"]
+
+# 作业 2 参考答案
+endpoint = ("deepseek-chat", "https://api.deepseek.com/v1", 4096, 0.7)
+name, base_url, max_tokens, temperature = endpoint
+model_name, *_, temp = endpoint
+
+# 作业 3 参考答案
+set_v = set(["合同", "报销", "差旅", "报销", "财务制度"])
+set_b = set(["差旅", "审批流", "财务制度", "HR"])
+print("并集:", sorted(set_v | set_b))
+print("交集:", sorted(set_v &amp; set_b))
+print("差集:", sorted(set_v - set_b))</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
