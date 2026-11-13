@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 20 | 智枢企业级智能体平台 · 多模态与 Embedding 语义检索</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第二阶段：大模型与 Web 工程 · Day 20 | 版本 v0.2.0-day20</div>
+      <h1>多模态与 Embedding 模型（余弦相似度 & 语义 FAQ 检索）</h1>
+      <p>企业需求驱动（Issue #020）：掌握 OpenAI Vision 多模态消息协议，手写零依赖确定性向量嵌入与语义 FAQ 检索器</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“关键词匹配”到“语义向量”）：</strong><br />
+      在企业知识库问答中，用户问“出差票据怎么报”，而文档写的是“差旅费用和发票怎么提交报销？”——两者字面并不完全重合，传统的 <code>in</code> 或 SQL <code>LIKE</code> 检索会直接失效。通过 <strong>Embedding</strong> 把文本映射到高维向量空间，再用<strong>余弦相似度</strong>衡量语义方向夹角，智能体就能真正“听懂”用户的意图。今天我们还将同时打通 <strong>Vision 多模态消息封装</strong>，让智枢平台既能“看图”也能“搜义”！
+    </div>
+
+    <h2>一、语义 FAQ 检索核心架构图</h2>
+    <div class="card">
+      <p>一次完整的语义检索包含<strong>离线建库向量化</strong>与<strong>在线余弦相似度 Top-K 召回</strong>两个环节：</p>
+      <div class="mermaid">
+        flowchart LR
+          A["用户提问 Query"] --> B["LocalEmbeddingModel (Unigram + Bigram + L2 归一化)"]
+          B --> C["Query 单位向量"]
+          D["企业知识库 FAQ"] --> E["预计算 FAQ 向量索引"]
+          C --> F["cosine_similarity 计算夹角余弦"]
+          E --> F
+          F --> G["降序排序 & min_score 过滤"]
+          G --> H["Top-K 语义匹配结果 (FAQMatch)"]
+      </div>
+    </div>
+
+    <h2>二、核心组件与协议规范</h2>
+    <div class="card">
+      <h3>1. OpenAI Vision 多模态消息格式</h3>
+      <p><code>build_multimodal_message(text, image_url, detail="auto")</code> 将 <code>content</code> 封装为结构化列表：</p>
+      <pre><code>{
+  "role": "user",
+  "content": [
+    {"type": "text", "text": "请识别这张报销发票上的金额与开票日期。"},
+    {"type": "image_url", "image_url": {"url": "https://example.xingchen.local/invoice.png", "detail": "high"}}
+  ]
+}</code></pre>
+
+      <h3>2. 核心模块能力对照表</h3>
+      <table>
+        <thead>
+          <tr><th>符号名称</th><th>核心职责</th><th>工程亮点</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>build_multimodal_message</code></td><td>构造 Vision 多模态消息载荷</td><td>校验空文本/空 URL 与 <code>detail</code> 枚举</td></tr>
+          <tr><td><code>LocalEmbeddingModel</code></td><td>纯 Python 确定性向量编码器</td><td>基于 <code>hashlib.md5</code> 特征哈希 + L2 归一化，无 <code>numpy</code> 依赖</td></tr>
+          <tr><td><code>cosine_similarity</code></td><td>计算两向量余弦相似度</td><td>支持零向量兜底、维度校验与 <code>[-1, 1]</code> 钳位</td></tr>
+          <tr><td><code>SemanticFAQMatcher</code></td><td>语义 FAQ 索引与 Top-K 检索</td><td>预计算问题向量，支持 <code>top_k</code> 与 <code>min_score</code> 过滤</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、本地启动与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 20 多模态消息与语义 FAQ 检索演示
+.venv/bin/python project_iterations/day_20/main.py
+
+# 2. 一键执行 Day 20 Notebook 与 9 项 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_02_llm_and_web/day_20/notebook.ipynb \
+  --iter project_iterations/day_20</code></pre>
+      <details>
+        <summary>点击查看：为什么 LocalEmbeddingModel 不能用 Python 内置的 hash()？</summary>
+        <p>Python 3 默认启用了 <code>PYTHONHASHSEED</code> 随机化，内置 <code>hash("报销")</code> 在不同进程中会返回完全不同的整数。使用 <code>hashlib.md5</code> 做特征哈希可以保证任何机器、任何进程生成的向量 100% 一致。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
