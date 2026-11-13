@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 49 | 智枢企业级智能体平台 · 多 Agent 智能办公助手全栈交付</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：智能体开发与多智能体编排 · Day 49 | 版本 v0.4.0-day49</div>
+      <h1>里程碑项目 3（Part 2）：多 Agent 智能办公助手全栈交付</h1>
+      <p>企业需求驱动（Issue #049）：FastAPI 后端 + SQLite 检查点持久化 + Human-in-the-Loop（HITL）人工审批前端工作台</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（让人类站在高危动作的最后一道防线）：</strong><br />
+      在企业级办公自动化中，<strong>“查制度”</strong>可以全自动放行，但<strong>“发全员邮件、批报销、订高管会议室”</strong>必须经过人类审批。今天我们将把多 Agent 编排引擎接入 <strong>FastAPI</strong> 与 <strong>Web 审批工作台</strong>，实现“执行 → 中断挂起（<code>awaiting_approval</code>）→ 人工 Approve/Reject → 检查点恢复（<code>resume</code>）”的全栈闭环！
+    </div>
+
+    <h2>一、HITL 全栈交互时序图</h2>
+    <div class="card">
+      <p>通过 <code>OfficeCheckpointer</code>（SQLite）将挂起线程状态落盘，前端通过 <code>thread_id</code> 展示审批卡片并调用 <code>/api/v1/office/resume</code> 恢复执行：</p>
+      <div class="mermaid">
+        sequenceDiagram
+          autonumber
+          actor User as 企业员工 / 审批人
+          participant UI as Web UI (index.html)
+          participant API as FastAPI (office_web_app.py)
+          participant Sup as OfficeOrchestrator
+          participant DB as SQLite Checkpointer
+
+          User->>UI: 提交办公指令（如：发送全员邮件）
+          UI->>API: POST /api/v1/office/run
+          API->>Sup: run(task)
+          Sup->>DB: 保存挂起状态 (awaiting_approval)
+          API-->>UI: 返回 thread_id + pending_action
+          UI-->>User: 渲染 HITL 审批卡片 (Approve / Reject)
+          User->>UI: 点击 Approve 或 Reject
+          UI->>API: POST /api/v1/office/resume
+          API->>DB: load(thread_id) 并校验状态机
+          Sup->>DB: 更新终态 (completed / rejected)
+          API-->>UI: 返回最终流转轨迹与执行回执
+      </div>
+    </div>
+
+    <h2>二、FastAPI 核心接口契约</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>方法与路径</th>
+            <th>核心职责</th>
+            <th>关键响应 / 状态码</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET /</code></td>
+            <td>托管 <code>frontend/index.html</code> 多 Agent 审批工作台</td>
+            <td><code>200 HTMLResponse</code></td>
+          </tr>
+          <tr>
+            <td><code>POST /api/v1/office/run</code></td>
+            <td>启动 Supervisor + Worker 编排，低风险直接完成，高风险触发中断</td>
+            <td><code>200 ThreadState</code>（<code>completed</code> / <code>awaiting_approval</code>），空任务 <code>400</code></td>
+          </tr>
+          <tr>
+            <td><code>POST /api/v1/office/resume</code></td>
+            <td>接收 <code>approved</code>、<code>comment</code> 与可选 <code>edited_payload</code> 恢复执行</td>
+            <td><code>200 ThreadState</code>（<code>completed</code> / <code>rejected</code>），不存在 <code>404</code>，重复审批 <code>409</code></td>
+          </tr>
+          <tr>
+            <td><code>GET /api/v1/office/threads/{thread_id}</code></td>
+            <td>查询指定线程的完整流转轨迹与待审批载荷</td>
+            <td><code>200 ThreadState</code> / <code>404</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、随堂思考与课后实战</h2>
+    <div class="card">
+      <h3>思考题：为什么 <code>POST /api/v1/office/resume</code> 在线程已完成后再次调用必须返回 <code>409 Conflict</code>？</h3>
+      <details>
+        <summary>点击查看参考解析</summary>
+        <p>
+          审批动作（如发送全员邮件、财务打款）具有<strong>不可逆的外部副作用</strong>。如果前端因网络抖动或用户连击导致同一 <code>thread_id</code> 被重复提交 <code>resume</code>，服务端通过状态机守卫（仅允许 <code>status == "awaiting_approval"</code> 进入恢复逻辑，否则抛出 <code>InvalidThreadStateError</code> 映射为 HTTP <code>409</code>）即可保证严格幂等与资金/消息安全。
+        </p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
