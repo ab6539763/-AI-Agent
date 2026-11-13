@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>智枢企业级智能体对话台</title>
+  <style>
+    :root {
+      --bg-page: #f1f5f9;
+      --bg-card: #ffffff;
+      --bg-header: #0f172a;
+      --bg-user: #2563eb;
+      --bg-assistant: #f8fafc;
+      --border-color: #e2e8f0;
+      --text-primary: #0f172a;
+      --text-secondary: #475569;
+      --text-muted: #94a3b8;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --success: #10b981;
+      --shadow-lg: 0 18px 40px -15px rgba(15, 23, 42, 0.16);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      background: linear-gradient(135deg, #e2e8f0 0%, #f8fafc 100%);
+      color: var(--text-primary);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .chat-app {
+      width: 100%;
+      max-width: 880px;
+      height: 88vh;
+      min-height: 540px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 18px;
+      box-shadow: var(--shadow-lg);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .chat-header {
+      background: var(--bg-header);
+      color: #f8fafc;
+      padding: 16px 22px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-logo {
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #38bdf8 0%, #2563eb 100%);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 18px;
+      color: #ffffff;
+      flex-shrink: 0;
+    }
+
+    .brand-title {
+      font-size: 17px;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+    }
+
+    .brand-subtitle {
+      font-size: 12px;
+      color: #94a3b8;
+      margin-top: 2px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(16, 185, 129, 0.15);
+      color: #6ee7b7;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--success);
+    }
+
+    .clear-btn {
+      background: rgba(255, 255, 255, 0.1);
+      color: #e2e8f0;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+
+    .clear-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .chat-messages {
+      flex: 1;
+      padding: 20px 22px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      background: #f8fafc;
+    }
+
+    .message {
+      display: flex;
+      flex-direction: column;
+      max-width: 78%;
+      gap: 4px;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      align-items: flex-end;
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+      align-items: flex-start;
+    }
+
+    .message-meta {
+      font-size: 12px;
+      color: var(--text-muted);
+      padding: 0 4px;
+    }
+
+    .bubble {
+      padding: 12px 16px;
+      border-radius: 14px;
+      font-size: 14.5px;
+      line-height: 1.65;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .message.user .bubble {
+      background: var(--bg-user);
+      color: #ffffff;
+      border-bottom-right-radius: 4px;
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.22);
+    }
+
+    .message.assistant .bubble {
+      background: #ffffff;
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 2px 6px rgba(15, 23, 42, 0.04);
+    }
+
+    .quick-prompts {
+      padding: 10px 22px 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      background: var(--bg-card);
+      border-top: 1px solid var(--border-color);
+    }
+
+    .prompt-chip {
+      font-size: 12px;
+      color: var(--text-secondary);
+      background: #f1f5f9;
+      border: 1px solid var(--border-color);
+      border-radius: 999px;
+      padding: 5px 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .prompt-chip:hover {
+      background: #e0f2fe;
+      color: #0369a1;
+      border-color: #bae6fd;
+    }
+
+    .chat-input-area {
+      padding: 14px 22px 18px;
+      background: var(--bg-card);
+    }
+
+    .chat-form {
+      display: flex;
+      align-items: flex-end;
+      gap: 12px;
+      background: #f8fafc;
+      border: 1px solid var(--border-color);
+      border-radius: 14px;
+      padding: 8px 10px 8px 14px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .chat-form:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+      background: #ffffff;
+    }
+
+    #user-input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      resize: none;
+      outline: none;
+      font-family: inherit;
+      font-size: 14.5px;
+      line-height: 1.5;
+      max-height: 120px;
+      color: var(--text-primary);
+      padding: 4px 0;
+    }
+
+    #send-btn {
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      border-radius: 10px;
+      padding: 9px 18px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.15s ease, opacity 0.15s ease;
+    }
+
+    #send-btn:hover:not(:disabled) {
+      background: var(--accent-hover);
+    }
+
+    #send-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 0;
+      }
+
+      .chat-app {
+        height: 100vh;
+        border-radius: 0;
+        border: none;
+      }
+
+      .chat-header {
+        padding: 14px 16px;
+      }
+
+      .brand-subtitle {
+        display: none;
+      }
+
+      .message {
+        max-width: 88%;
+      }
+
+      .chat-messages,
+      .quick-prompts,
+      .chat-input-area {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="chat-app">
+    <header class="chat-header">
+      <div class="brand-group">
+        <div class="brand-logo">智</div>
+        <div>
+          <div class="brand-title">智枢企业级智能体对话台</div>
+          <div class="brand-subtitle">星辰数科 · ZhiShu-Agent v0.2.0-day22</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <span id="api-status" class="status-pill">
+          <span class="status-dot"></span>
+          <span>就绪 (fetch Demo)</span>
+        </span>
+        <button id="clear-btn" class="clear-btn" type="button">清空会话</button>
+      </div>
+    </header>
+
+    <section id="chat-messages" class="chat-messages" aria-live="polite">
+      <div class="message assistant">
+        <div class="message-meta">智枢助手 · 刚刚</div>
+        <div class="bubble">您好！我是星辰数科「智枢企业级智能体对话台」前端界面。请输入您的问题，我将通过 JavaScript fetch() 向后端 API 发送 JSON 请求并展示回复。</div>
+      </div>
+    </section>
+
+    <div class="quick-prompts">
+      <button class="prompt-chip" type="button" data-prompt="帮我查询今天北京的天气情况">查询北京天气</button>
+      <button class="prompt-chip" type="button" data-prompt="公司报销审批流程需要几个工作日？">报销审批流程</button>
+      <button class="prompt-chip" type="button" data-prompt="请总结一下 Q3 智能体平台上线进度">Q3 上线进度</button>
+    </div>
+
+    <footer class="chat-input-area">
+      <form id="chat-form" class="chat-form">
+        <textarea
+          id="user-input"
+          rows="1"
+          placeholder="请输入您的问题（Enter 发送，Shift + Enter 换行）..."
+          autocomplete="off"
+          required
+        ></textarea>
+        <button id="send-btn" type="submit">发送</button>
+      </form>
+    </footer>
+  </main>
+
+  <script>
+    const API_ENDPOINT = "/api/v1/chat";
+    const sessionId = "sess_" + Math.random().toString(36).slice(2, 10);
+
+    const chatMessages = document.getElementById("chat-messages");
+    const chatForm = document.getElementById("chat-form");
+    const userInput = document.getElementById("user-input");
+    const sendBtn = document.getElementById("send-btn");
+    const clearBtn = document.getElementById("clear-btn");
+    const apiStatus = document.getElementById("api-status");
+
+    function formatTime() {
+      const now = new Date();
+      return now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    }
+
+    function appendMessage(role, text) {
+      const wrapper = document.createElement("div");
+      wrapper.className = `message ${role}`;
+
+      const meta = document.createElement("div");
+      meta.className = "message-meta";
+      meta.textContent = `${role === "user" ? "我" : "智枢助手"} · ${formatTime()}`;
+
+      const bubble = document.createElement("div");
+      bubble.className = "bubble";
+      bubble.textContent = text;
+
+      wrapper.appendChild(meta);
+      wrapper.appendChild(bubble);
+      chatMessages.appendChild(wrapper);
+      chatMessages.scrollTop = chatMessages.scrollHeight;
+      return bubble;
+    }
+
+    async function sendMessage(promptText) {
+      const trimmed = promptText.trim();
+      if (!trimmed) return;
+
+      appendMessage("user", trimmed);
+      userInput.value = "";
+      userInput.style.height = "auto";
+      sendBtn.disabled = true;
+      sendBtn.textContent = "发送中...";
+
+      const loadingBubble = appendMessage("assistant", "正在思考并请求后端接口...");
+
+      try {
+        const response = await fetch(API_ENDPOINT, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            session_id: sessionId,
+            message: trimmed
+          })
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status} ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        loadingBubble.textContent = data.reply || data.answer || JSON.stringify(data);
+        apiStatus.innerHTML = '<span class="status-dot"></span><span>API 已连接</span>';
+      } catch (err) {
+        // 静态 HTML 离线演示兜底：当尚未启动后端 API 时，展示 fetch 请求载荷与模拟回复
+        loadingBubble.textContent =
+          `[离线静态演示模式] 已构造 POST ${API_ENDPOINT} 请求（session_id=${sessionId}）。\n` +
+          `您的问题是：「${trimmed}」\n` +
+          `提示：当前未检测到后端服务（${err.message}），后续 Day 23 接入 FastAPI 后即可获得真实大模型回复。`;
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.textContent = "发送";
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+      }
+    }
+
+    chatForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      sendMessage(userInput.value);
+    });
+
+    userInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        sendMessage(userInput.value);
+      }
+    });
+
+    userInput.addEventListener("input", () => {
+      userInput.style.height = "auto";
+      userInput.style.height = Math.min(userInput.scrollHeight, 120) + "px";
+    });
+
+    clearBtn.addEventListener("click", () => {
+      chatMessages.innerHTML = "";
+      appendMessage("assistant", "会话已清空，请继续输入您的问题。");
+    });
+
+    document.querySelectorAll(".prompt-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const prompt = chip.getAttribute("data-prompt") || "";
+        sendMessage(prompt);
+      });
+    });
+  </script>
+</body>
+</html>
