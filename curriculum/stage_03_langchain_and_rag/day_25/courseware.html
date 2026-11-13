@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 25 | 智枢企业级智能体平台 · LangChain 统一模型抽象与提示词模板</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段开篇：LangChain 与 RAG 知识库 · Day 25 | 版本 v0.3.0-day25</div>
+      <h1>LangChain 初探：统一 ChatModel 与 ChatPromptTemplate 网关架构</h1>
+      <p>企业需求驱动（Issue #025）：告别硬编码 HTTP 字典拼接，用面向对象的消息体系与统一模型接口实现 DeepSeek / Qwen 无缝切换</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（第三阶段开篇）：</strong><br />
+      欢迎进入第三阶段！当企业业务同时需要接入 <strong>DeepSeek</strong>、<strong>通义千问 Qwen</strong> 甚至私有化模型时，如果业务代码里写满各家不同的请求格式，系统很快就会变成难以维护的“意大利面条”。今天我们用纯正的 LangChain 设计思想，打造一套<strong>统一模型网关（<code>BaseChatModel</code>）</strong>与<strong>声明式模板引擎（<code>ChatPromptTemplate</code>）</strong>！
+    </div>
+
+    <h2>一、LangChain 统一网关核心类图</h2>
+    <div class="card">
+      <p>通过抽象基类与标准消息协议，将“业务提示词编排”与“底层模型厂商实现”彻底解耦：</p>
+      <div class="mermaid">
+        classDiagram
+          class BaseMessage {
+            +str content
+            +str role
+            +to_dict() dict
+            +pretty_repr() str
+          }
+          class SystemMessage
+          class HumanMessage
+          class AIMessage
+          BaseMessage <|-- SystemMessage
+          BaseMessage <|-- HumanMessage
+          BaseMessage <|-- AIMessage
+
+          class ChatPromptTemplate {
+            +list~str~ input_variables
+            +from_messages(messages) ChatPromptTemplate
+            +format_messages(**kwargs) list~BaseMessage~
+            +invoke(inputs) ChatPromptValue
+          }
+
+          class BaseChatModel {
+            <<abstract>>
+            +str model_name
+            #_generate(messages)* AIMessage
+            +invoke(prompt_input) AIMessage
+            +batch(inputs) list~AIMessage~
+          }
+          class DeepSeekChatModel
+          class QwenChatModel
+          BaseChatModel <|-- DeepSeekChatModel
+          BaseChatModel <|-- QwenChatModel
+
+          ChatPromptTemplate ..> BaseMessage : formats
+          BaseChatModel ..> BaseMessage : consumes
+      </div>
+    </div>
+
+    <h2>二、三大核心工程组件拆解</h2>
+    <div class="card">
+      <h3>1. 标准化消息对象（<code>BaseMessage</code> 家族）</h3>
+      <table>
+        <thead>
+          <tr><th>消息类</th><th>内部 <code>role / type</code></th><th>典型业务职责</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>SystemMessage</code></td><td><code>system</code></td><td>设定智能体人设、业务边界与输出格式要求</td></tr>
+          <tr><td><code>HumanMessage</code></td><td><code>user</code></td><td>封装终端用户的当前提问或指令</td></tr>
+          <tr><td><code>AIMessage</code></td><td><code>assistant</code></td><td>承载大模型回复正文及 <code>response_metadata</code>（token 用量等）</td></tr>
+        </tbody>
+      </table>
+
+      <h3>2. 声明式模板：<code>ChatPromptTemplate.from_messages(...)</code></h3>
+      <pre><code>prompt = ChatPromptTemplate.from_messages([
+    ("system", "你是星辰数科的 {role}，擅长 {domain}。"),
+    ("human", "请分析：{question}"),
+])
+
+# 自动识别占位符: ['role', 'domain', 'question']
+prompt_value = prompt.invoke({
+    "role": "AI 架构师",
+    "domain": "多模型网关",
+    "question": "如何零成本切换 DeepSeek 与 Qwen？",
+})</code></pre>
+
+      <h3>3. 无缝切换模型：<code>BaseChatModel</code> 与 <code>get_chat_model</code></h3>
+      <pre><code>for provider in ("deepseek", "qwen"):
+    model = get_chat_model(provider)
+    reply = model.invoke(prompt_value)
+    print(reply.content)
+    print(reply.response_metadata)</code></pre>
+    </div>
+
+    <h2>三、本地运行与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 25 统一多模型网关演示脚本
+.venv/bin/python project_iterations/day_25/main.py
+
+# 2. 一键执行 Day 25 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_03_langchain_and_rag/day_25/notebook.ipynb \
+  --iter project_iterations/day_25</code></pre>
+      <details>
+        <summary>思考题：为什么 BaseChatModel 把输入归一化放在 invoke()，而让子类只实现 _generate()？</summary>
+        <p>这是典型的<strong>模板方法模式（Template Method）</strong>。无论是传字符串、消息列表还是 <code>ChatPromptValue</code>，都在基类 <code>invoke()</code> 中统一转换成 <code>list[BaseMessage]</code>，各厂商子类只需专注处理标准消息列表即可，大幅减少重复代码。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
