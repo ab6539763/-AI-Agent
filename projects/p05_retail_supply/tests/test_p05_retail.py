@@ -213,3 +213,104 @@ def test_fastapi_endpoints_and_request_id_middleware(tmp_path: Path) -> None:
     assert metrics.status_code == 200
     assert metrics.json()["requests_total"] >= 7
     assert metrics.json()["actions_total"] >= 1
+
+
+def test_cors_middleware_allows_cross_origin_requests(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path / "cors_data")
+    client = TestClient(app)
+
+    preflight = client.options(
+        "/api/v1/dashboard/overview",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers.get("access-control-allow-origin") == "*"
+
+    resp = client.get(
+        "/api/v1/dashboard/overview",
+        headers={"Origin": "http://localhost:5173"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") == "*"
+
+
+def test_enterprise_dashboard_wiki_actions_and_audit_endpoints(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path / "enterprise_data")
+    client = TestClient(app)
+
+    overview = client.get("/api/v1/dashboard/overview")
+    assert overview.status_code == 200
+    ov = overview.json()
+    assert ov["total_skus"] == 3
+    assert ov["suppliers"] == 2
+    assert ov["warehouses"] == 2
+    assert ov["wiki_pages"] == 7  # 2 warehouses + 2 suppliers + 3 SKUs
+    assert ov["stockout_alerts"] >= 2
+    assert ov["pending_hitl_pos"] == 0
+
+    pages = client.get("/api/v1/wiki/pages")
+    assert pages.status_code == 200
+    pages_data = pages.json()
+    assert pages_data["total"] == 7
+    sample_page = pages_data["items"][0]
+    assert {"id", "title", "path", "preview"}.issubset(sample_page.keys())
+
+    query_res = client.get("/api/v1/wiki/query", params={"q": "Espresso"})
+    assert query_res.status_code == 200
+    assert len(query_res.json()["matches"]) >= 1
+
+    # Trigger a bulk replenishment that requires HITL
+    repl = client.post("/api/v1/supply/replenish", json={"sku_id": "SKU-1001", "requested_qty": 220})
+    assert repl.status_code == 200
+    action_id = repl.json()["action"]["action_id"]
+
+    pending = client.get("/api/v1/actions/pending")
+    assert pending.status_code == 200
+    assert pending.json()["total"] == 1
+    assert pending.json()["items"][0]["action_id"] == action_id
+
+    # Overview reflects pending HITL PO and audit log
+    ov_after = client.get("/api/v1/dashboard/overview").json()
+    assert ov_after["pending_hitl_pos"] == 1
+    assert ov_after["audit_logs"] >= 1
+
+    logs = client.get("/api/v1/audit/logs")
+    assert logs.status_code == 200
+    assert logs.json()["total"] >= 1
+    assert logs.json()["items"][0]["event"] == "REPLENISHMENT_PLANNED"
+
+
+def test_enterprise_margin_simulation_endpoint_and_guardrail(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path / "sim_data")
+    client = TestClient(app)
+
+    # Multi-SKU simulation: SKU-1001 with 15% off passes (>=20% floor),
+    # SKU-1002 with 60% off breaches 25% margin floor -> blocked
+    sim = client.post(
+        "/api/v1/supply/margin-simulate",
+        json={
+            "items": [
+                {"sku_id": "SKU-1001", "promo_discount_pct": 0.15, "projected_units": 100},
+                {"sku_id": "SKU-1002", "promo_discount_pct": 0.60, "projected_units": 200},
+            ]
+        },
+    )
+    assert sim.status_code == 200
+    data = sim.json()
+    assert data["total_skus_simulated"] == 2
+    assert data["guardrail_passed_count"] == 1
+    assert data["guardrail_blocked_count"] == 1
+    assert data["all_passed"] is False
+    assert data["results"][0]["guardrail_passed"] is True
+    assert data["results"][1]["guardrail_passed"] is False
+
+    # Unknown SKU returns 404
+    bad_sim = client.post(
+        "/api/v1/supply/margin-simulate",
+        json={"items": [{"sku_id": "SKU-UNKNOWN", "promo_discount_pct": 0.1}]},
+    )
+    assert bad_sim.status_code == 404
+

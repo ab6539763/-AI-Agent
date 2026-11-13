@@ -328,3 +328,158 @@ def test_fastapi_endpoints_and_request_id_middleware(tmp_path: Path) -> None:
     assert r_metrics.status_code == 200
     assert r_metrics.json()["hitl_approved"] >= 1
     assert r_metrics.json()["requests_total"] >= 6
+
+
+def test_cors_middleware_headers(tmp_path: Path) -> None:
+    """Test CORSMiddleware allows cross-origin requests and preflight OPTIONS."""
+    app = create_app(data_dir=tmp_path / "cors_data", seed_defaults=True)
+    client = TestClient(app)
+
+    r_preflight = client.options(
+        "/api/v1/dashboard/overview",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert r_preflight.status_code == 200
+    assert r_preflight.headers.get("access-control-allow-origin") == "*"
+
+    r_get = client.get(
+        "/health",
+        headers={"Origin": "http://localhost:5173"},
+    )
+    assert r_get.status_code == 200
+    assert r_get.headers.get("access-control-allow-origin") == "*"
+
+
+def test_enterprise_dashboard_wiki_pending_actions_and_audit_logs(tmp_path: Path) -> None:
+    """Test /api/v1/dashboard/overview, /api/v1/wiki/pages, /api/v1/actions/pending, and /api/v1/audit/logs."""
+    app = create_app(data_dir=tmp_path / "ent_data", seed_defaults=True)
+    client = TestClient(app)
+
+    # 1. Dashboard overview
+    r_overview = client.get("/api/v1/dashboard/overview")
+    assert r_overview.status_code == 200
+    ov = r_overview.json()
+    assert ov["service"] == "p06-govtech-policy"
+    assert ov["active_policies"] >= 2
+    assert ov["benefit_programs"] >= 2
+    assert ov["wiki_pages"] >= 2
+    assert ov["pending_hitl_reviews"] == 0
+
+    # 2. Wiki pages listing
+    r_pages = client.get("/api/v1/wiki/pages")
+    assert r_pages.status_code == 200
+    pages = r_pages.json()
+    assert len(pages) >= 2
+    for page in pages:
+        assert "id" in page
+        assert "title" in page
+        assert "path" in page
+        assert "preview" in page
+
+    # 3. Trigger a pending HITL action via /api/v1/policy/ask
+    enterprise_profile = {
+        "applicant_id": "ENT-PEND-01",
+        "applicant_type": "enterprise",
+        "name": "量子云科技有限公司",
+        "identifier": "91310000MA1K777766",
+        "region": "浦东新区",
+        "annual_income_or_revenue": 5000000.0,
+        "employee_count": 50,
+        "industry": "云计算",
+        "tags": ["高新技术"],
+    }
+    r_ask = client.post(
+        "/api/v1/policy/ask",
+        json={
+            "question": "我司统一社会信用代码91310000MA1K777766，联系人手机13800138000，申请研发补贴。",
+            "profile": enterprise_profile,
+            "program_id": "PROG-TECH-RD-500K",
+            "create_hitl_action": True,
+        },
+    )
+    assert r_ask.status_code == 200
+    action_id = r_ask.json()["pending_action"]["action_id"]
+
+    # 4. Pending actions endpoint
+    r_pending = client.get("/api/v1/actions/pending")
+    assert r_pending.status_code == 200
+    pending_list = r_pending.json()
+    assert any(a["action_id"] == action_id for a in pending_list)
+
+    # 5. Audit logs endpoint (must be PII-safe)
+    r_audit = client.get("/api/v1/audit/logs")
+    assert r_audit.status_code == 200
+    logs = r_audit.json()
+    assert len(logs) >= 2
+    serialized = str(logs)
+    assert "91310000MA1K777766" not in serialized
+    assert "13800138000" not in serialized
+
+
+def test_enterprise_policy_batch_match_matrix(tmp_path: Path) -> None:
+    """Test POST /api/v1/policy/batch-match multi-program eligibility matrix."""
+    app = create_app(data_dir=tmp_path / "batch_data", seed_defaults=True)
+    client = TestClient(app)
+
+    payload = {
+        "profiles": [
+            {
+                "applicant_id": "ENT-BATCH-01",
+                "applicant_type": "enterprise",
+                "name": "智算未来有限公司",
+                "identifier": "91310000MA1K111122",
+                "region": "张江科学城",
+                "annual_income_or_revenue": 6000000.0,
+                "employee_count": 60,
+                "industry": "人工智能",
+                "tags": ["高新技术"],
+            },
+            {
+                "applicant_id": "CIT-BATCH-02",
+                "applicant_type": "citizen",
+                "name": "王芳",
+                "identifier": "310101199808081234",
+                "region": "徐汇区",
+                "annual_income_or_revenue": 220000.0,
+                "employee_count": 0,
+                "industry": "集成电路",
+                "tags": ["青年人才"],
+            },
+            {
+                "applicant_id": "ENT-BATCH-03",
+                "applicant_type": "enterprise",
+                "name": "微小商贸个体",
+                "identifier": "91310000MA1K333344",
+                "region": "黄浦区",
+                "annual_income_or_revenue": 150000.0,
+                "employee_count": 2,
+                "industry": "零售",
+                "tags": [],
+            },
+        ]
+    }
+
+    r_batch = client.post("/api/v1/policy/batch-match", json=payload)
+    assert r_batch.status_code == 200
+    data = r_batch.json()
+    assert data["total_applicants"] == 3
+    assert data["total_programs_evaluated"] >= 2
+    assert data["eligible_applicants"] == 2
+    assert data["total_potential_subsidy"] == 524000.0
+    assert len(data["matrix"]) == 3
+
+    # Verify identifiers are masked in response
+    for row in data["matrix"]:
+        assert "91310000MA1K111122" not in row["masked_identifier"]
+        assert "310101199808081234" not in row["masked_identifier"]
+        assert "*" in row["masked_identifier"]
+
+    # Unknown program_id returns 404
+    r_err = client.post(
+        "/api/v1/policy/batch-match",
+        json={"profiles": [payload["profiles"][0]], "program_ids": ["UNKNOWN-PROG"]},
+    )
+    assert r_err.status_code == 404

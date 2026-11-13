@@ -5,7 +5,7 @@ estimated_minutes: 60
 entity_id: SOP-VIB-002
 entity_type: MaintenanceSOP
 title: High-Frequency Vibration & Rotor Re-balancing
-updated_at: 2026-11-13T09:05:27.703162+00:00
+updated_at: 2026-11-13T12:06:10.191343+00:00
 ---
 
 # High-Frequency Vibration & Rotor Re-balancing (`SOP-VIB-002`)

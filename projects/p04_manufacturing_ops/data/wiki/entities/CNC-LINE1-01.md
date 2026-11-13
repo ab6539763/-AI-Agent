@@ -5,7 +5,7 @@ status: OPERATIONAL
 entity_id: CNC-LINE1-01
 entity_type: Equipment
 title: 5-Axis CNC Machining Center #1
-updated_at: 2026-11-13T09:05:27.711241+00:00
+updated_at: 2026-11-13T12:06:10.199666+00:00
 ---
 
 # 5-Axis CNC Machining Center #1 (`CNC-LINE1-01`)

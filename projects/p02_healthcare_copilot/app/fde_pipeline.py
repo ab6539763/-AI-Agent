@@ -237,5 +237,151 @@ class HealthcareFDEPipeline:
     def get_action(self, action_id: str) -> ClinicalAction | None:
         return self._actions.get(action_id)
 
+    def list_pending_actions(self) -> list[ClinicalAction]:
+        """Return all clinical actions awaiting physician HITL sign-off."""
+        return [
+            action
+            for action in self._actions.values()
+            if action.status == "pending_review"
+        ]
+
+    def list_actions(self, status: str | None = None) -> list[ClinicalAction]:
+        """Return clinical actions, optionally filtered by status."""
+        if status is None:
+            return list(self._actions.values())
+        return [a for a in self._actions.values() if a.status == status]
+
+    def generate_discharge_summary(
+        self,
+        case_id: str,
+        raw_notes: str,
+        diagnosis: str = "",
+        conditions: list[str] | None = None,
+        medications: list[str] | None = None,
+        follow_up_days: int = 7,
+    ) -> dict[str, Any]:
+        """De-identify clinical discharge notes and build a deterministic follow-up checklist."""
+        masked_notes, notes_redacted = self.deidentify_phi(raw_notes)
+        masked_diagnosis, diag_redacted = self.deidentify_phi(diagnosis)
+        redacted_fields = sorted(set(notes_redacted + diag_redacted))
+
+        conds = [c.strip().lower() for c in (conditions or []) if c.strip()]
+        meds = [m.strip().lower() for m in (medications or []) if m.strip()]
+
+        interaction_result = self.registry.check_interactions(
+            proposed_med_ids=meds,
+            active_med_ids=[],
+            allergies=[],
+            conditions=conds,
+        )
+
+        wiki_hits: list[dict[str, Any]] = []
+        if self.wiki is not None:
+            query_str = " ".join(
+                [masked_diagnosis, masked_notes] + conds + meds
+            ).strip()
+            if query_str:
+                wiki_hits = self.wiki.query(query_str, top_k=3)
+
+        checklist: list[dict[str, Any]] = [
+            {
+                "step_id": "chk-med-reconciliation",
+                "category": "Medication Safety",
+                "task": (
+                    f"Reconcile discharge medications ({', '.join(meds)}) and review ontology safety status: {interaction_result.summary}"
+                    if meds
+                    else "Verify patient has no new outpatient prescriptions requiring reconciliation."
+                ),
+                "timeframe": "Before discharge",
+                "priority": "high" if interaction_result.has_conflicts else "standard",
+                "completed": False,
+            },
+            {
+                "step_id": "chk-followup-visit",
+                "category": "Outpatient Follow-up",
+                "task": f"Schedule primary care or specialist follow-up appointment within {follow_up_days} day(s).",
+                "timeframe": f"Within {follow_up_days} days",
+                "priority": "standard",
+                "completed": False,
+            },
+            {
+                "step_id": "chk-red-flag-education",
+                "category": "Return Precautions",
+                "task": "Educate patient/caregiver on emergency red-flag symptoms requiring immediate ED return.",
+                "timeframe": "At discharge",
+                "priority": "high",
+                "completed": False,
+            },
+        ]
+
+        if "warfarin" in meds:
+            checklist.append(
+                {
+                    "step_id": "chk-warfarin-inr",
+                    "category": "Lab Monitoring",
+                    "task": "Order outpatient PT/INR lab check within 3-5 days and counsel on bleeding precautions.",
+                    "timeframe": "3-5 days",
+                    "priority": "high",
+                    "completed": False,
+                }
+            )
+        if "lisinopril" in meds or "hypertension" in conds:
+            checklist.append(
+                {
+                    "step_id": "chk-bp-renal",
+                    "category": "Vitals & Renal Monitoring",
+                    "task": "Monitor home blood pressure log and check BMP (potassium/creatinine) in 1-2 weeks.",
+                    "timeframe": "7-14 days",
+                    "priority": "standard",
+                    "completed": False,
+                }
+            )
+        if "metformin" in meds:
+            checklist.append(
+                {
+                    "step_id": "chk-metformin-renal",
+                    "category": "Metabolic Monitoring",
+                    "task": "Verify baseline eGFR >= 30 mL/min/1.73m2 and counsel on lactic acidosis warning signs.",
+                    "timeframe": "7-14 days",
+                    "priority": "standard",
+                    "completed": False,
+                }
+            )
+
+        red_flag_precautions = [
+            "New or worsening chest pain, pressure, or radiation to arm/jaw",
+            "Acute shortness of breath or oxygen saturation < 90%",
+            "Sudden focal weakness, facial droop, or slurred speech",
+            "Fever >= 38.0 C, uncontrolled bleeding, or signs of anaphylaxis",
+        ]
+
+        generated_at = datetime.now(timezone.utc).isoformat()
+        self._record_audit(
+            event_type="DISCHARGE_SUMMARY",
+            case_id=case_id,
+            action_id=None,
+            details={
+                "redacted_phi_types": redacted_fields,
+                "medications_count": len(meds),
+                "conditions_count": len(conds),
+                "guardrail_blocked": interaction_result.blocked,
+                "checklist_items": len(checklist),
+            },
+        )
+
+        return {
+            "case_id": case_id,
+            "deidentified_diagnosis": masked_diagnosis,
+            "deidentified_note": masked_notes,
+            "redacted_phi_types": redacted_fields,
+            "conditions": conds,
+            "medications": meds,
+            "interaction_check": interaction_result.model_dump(),
+            "follow_up_checklist": checklist,
+            "red_flag_precautions": red_flag_precautions,
+            "wiki_references": wiki_hits,
+            "generated_at": generated_at,
+        }
+
     def get_audit_log(self) -> list[dict[str, Any]]:
         return list(self._audit_events)

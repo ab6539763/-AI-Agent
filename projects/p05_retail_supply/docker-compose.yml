@@ -1,24 +1,35 @@
 services:
-  p05-retail-supply:
+  backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: p05-retail-supply
+    container_name: p05-retail-backend
     ports:
-      - "8005:8005"
-    env_file:
-      - .env.example
+      - "8000:8000"
     environment:
       - P05_DATA_DIR=/app/data
-      - P05_PORT=8005
+      - P05_HOST=0.0.0.0
+      - P05_PORT=8000
     volumes:
       - p05_wiki_data:/app/data
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8005/health')"]
-      interval: 30s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: p05-retail-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

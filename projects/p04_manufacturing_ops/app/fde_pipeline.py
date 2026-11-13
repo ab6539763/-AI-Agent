@@ -229,5 +229,125 @@ class ManufacturingFDEPipeline:
     def get_action(self, action_id: str) -> OpsAction | None:
         return self.actions.get(action_id)
 
+    def get_pending_actions(self) -> list[OpsAction]:
+        return [
+            action
+            for action in self.actions.values()
+            if action.status == ActionStatus.PENDING_APPROVAL
+        ]
+
     def get_audit_trail(self) -> list[dict[str, Any]]:
         return list(self.audit_trail)
+
+    def generate_predictive_maintenance(
+        self,
+        samples: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Deterministic batch equipment health-score & MTBF maintenance schedule."""
+        eval_items: list[dict[str, Any]] = list(samples or [])
+        if not eval_items:
+            eval_items = [
+                {"equipment_id": eq_id, "readings": {}, "operating_hours": 120.0}
+                for eq_id in sorted(self.registry.equipment.keys())
+            ]
+
+        schedules: list[dict[str, Any]] = []
+        critical_count = 0
+
+        for item in eval_items:
+            equipment_id = str(item["equipment_id"])
+            readings: dict[str, float] = dict(item.get("readings") or {})
+            operating_hours = float(item.get("operating_hours") or 0.0)
+
+            eq = self.registry.get_equipment(equipment_id)
+            if eq is None:
+                raise KeyError(f"Unknown equipment_id: {equipment_id}")
+
+            # Evaluate without mutating equipment operational status if nominal,
+            # or use registry.diagnose for deterministic fault/SOP resolution.
+            prev_status = eq.status
+            diag = self.registry.diagnose(equipment_id=equipment_id, readings=readings)
+            eq.status = prev_status
+
+            health_score = 100.0
+            for metric, thresh in eq.thresholds.items():
+                if metric not in readings:
+                    continue
+                val = float(readings[metric])
+                if val >= thresh.critical:
+                    health_score -= 45.0
+                elif val >= thresh.warn:
+                    span = max(thresh.critical - thresh.warn, 1e-6)
+                    ratio = min(1.0, (val - thresh.warn) / span)
+                    health_score -= 20.0 + (20.0 * ratio)
+                elif thresh.warn > 0:
+                    health_score -= min(10.0, (val / thresh.warn) * 10.0)
+
+            health_score -= min(15.0, max(0.0, operating_hours) / 500.0)
+            health_score = round(max(5.0, min(100.0, health_score)), 1)
+
+            if health_score < 50.0:
+                risk_tier = "CRITICAL"
+                priority = "P0_IMMEDIATE"
+                window_hours = 4
+                critical_count += 1
+            elif health_score < 75.0:
+                risk_tier = "WARNING"
+                priority = "P1_SCHEDULED_24H"
+                window_hours = 24
+            elif health_score < 90.0:
+                risk_tier = "WATCH"
+                priority = "P2_PREVENTIVE_72H"
+                window_hours = 72
+            else:
+                risk_tier = "HEALTHY"
+                priority = "P3_ROUTINE_WEEKLY"
+                window_hours = 168
+
+            mtbf_hours = round(
+                max(24.0, (health_score / 100.0) * 1200.0 - operating_hours * 0.05),
+                1,
+            )
+
+            recommended_sops = [sop.sop_id for sop in diag.sops] or list(eq.sop_ids)
+            schedules.append(
+                {
+                    "equipment_id": eq.equipment_id,
+                    "equipment_name": eq.name,
+                    "line_id": eq.line_id,
+                    "health_score": health_score,
+                    "risk_tier": risk_tier,
+                    "priority": priority,
+                    "recommended_window_hours": window_hours,
+                    "estimated_mtbf_hours": mtbf_hours,
+                    "operating_hours": operating_hours,
+                    "triggered_fault_codes": [fc.code for fc in diag.fault_codes],
+                    "recommended_sops": recommended_sops,
+                }
+            )
+
+        avg_health = (
+            round(sum(s["health_score"] for s in schedules) / len(schedules), 1)
+            if schedules
+            else 100.0
+        )
+
+        self._record_audit(
+            event_type="PREDICTIVE_MAINTENANCE_RUN",
+            equipment_id=schedules[0]["equipment_id"] if len(schedules) == 1 else "PLANT-WIDE",
+            actor="predictive-engine",
+            detail={
+                "equipment_evaluated": len(schedules),
+                "average_health_score": avg_health,
+                "critical_count": critical_count,
+            },
+        )
+
+        return {
+            "generated_at": _utc_now_iso(),
+            "equipment_evaluated": len(schedules),
+            "average_health_score": avg_health,
+            "critical_count": critical_count,
+            "schedules": schedules,
+        }
+

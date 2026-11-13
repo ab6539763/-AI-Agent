@@ -250,3 +250,120 @@ def test_fastapi_contract_review_and_hitl_approve_e2e(tmp_path: Path) -> None:
     assert app_resp.status_code == 200
     assert app_resp.json()["action"]["status"] == "rejected"
     assert app_resp.json()["contract_status"] == "rejected"
+
+
+def test_fastapi_cors_headers(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path)
+    client = TestClient(app)
+
+    preflight = client.options(
+        "/api/v1/dashboard/overview",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers.get("access-control-allow-origin") == "*"
+
+    resp = client.get("/health", headers={"Origin": "http://localhost:5173"})
+    assert resp.status_code == 200
+    assert resp.headers.get("access-control-allow-origin") == "*"
+
+
+def test_fastapi_dashboard_overview_wiki_pages_and_regulations(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path)
+    client = TestClient(app)
+
+    # Review a contract with a critical clause
+    rev_resp = client.post(
+        "/api/v1/contracts/review",
+        json={
+            "contract_id": "ctr_dash_1",
+            "title": "Enterprise MSA",
+            "counterparty": "Globex Corp",
+            "text": "1. Liability\nVendor shall have unlimited liability for GDPR data breach claims.",
+        },
+    )
+    assert rev_resp.status_code == 200
+
+    dash_resp = client.get("/api/v1/dashboard/overview")
+    assert dash_resp.status_code == 200
+    dash = dash_resp.json()
+    assert dash["contracts_reviewed"] == 1
+    assert dash["high_risk_clauses"] >= 1
+    assert dash["active_regulations"] >= 5
+    assert dash["pending_gc_approvals"] == 1
+    assert dash["audit_logs_count"] >= 1
+    assert dash["wiki_pages_count"] >= 6
+
+    pages_resp = client.get("/api/v1/wiki/pages")
+    assert pages_resp.status_code == 200
+    pages_data = pages_resp.json()
+    assert pages_data["count"] >= 6
+    page_ids = {p["id"] for p in pages_data["pages"]}
+    assert "reg_gdpr_art28" in page_ids
+    assert "ctr_dash_1" in page_ids
+    for page in pages_data["pages"]:
+        assert {"id", "title", "path", "preview"}.issubset(page.keys())
+
+    regs_resp = client.get("/api/v1/ontology/regulations")
+    assert regs_resp.status_code == 200
+    assert regs_resp.json()["count"] >= 6
+
+
+def test_fastapi_pending_actions_audit_logs_and_redline_diff(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path)
+    client = TestClient(app)
+
+    # 1. Trigger a pending HITL approval
+    rev_resp = client.post(
+        "/api/v1/contracts/review",
+        json={
+            "contract_id": "ctr_pending_1",
+            "title": "Vendor DPA",
+            "text": "1. Liability\nVendor accepts unlimited liability for all damages.",
+        },
+    )
+    assert rev_resp.status_code == 200
+
+    pending_resp = client.get("/api/v1/actions/pending")
+    assert pending_resp.status_code == 200
+    pending_data = pending_resp.json()
+    assert pending_data["count"] == 1
+    assert pending_data["actions"][0]["status"] == "pending"
+
+    # 2. Run redline-diff comparing uncapped v1 against capped v2
+    diff_resp = client.post(
+        "/api/v1/contracts/redline-diff",
+        json={
+            "contract_id": "ctr_diff_1",
+            "title": "MSA v1 vs v2",
+            "original_text": (
+                "1. Liability\nVendor shall have unlimited liability for all claims.\n\n"
+                "2. Privacy\nVendor may sell personal data without opt-out."
+            ),
+            "revised_text": (
+                "1. Liability\nVendor total aggregate liability shall not exceed $500,000.\n\n"
+                "2. Privacy\nVendor shall process personal data strictly under GDPR Art.28."
+            ),
+        },
+    )
+    assert diff_resp.status_code == 200
+    diff = diff_resp.json()
+    assert diff["original_risk_level"] == "critical"
+    assert diff["revised_risk_level"] == "low"
+    assert diff["risk_score_delta"] < 0
+    assert diff["risk_trend"] == "improved"
+    assert len(diff["clause_diffs"]) == 2
+    assert diff["clause_diffs"][0]["risk_delta"] < 0
+
+    # 3. Verify audit logs record both events
+    audit_resp = client.get("/api/v1/audit/logs")
+    assert audit_resp.status_code == 200
+    audit_data = audit_resp.json()
+    assert audit_data["count"] >= 2
+    event_types = {entry["event_type"] for entry in audit_data["logs"]}
+    assert "CONTRACT_REVIEWED" in event_types
+    assert "CONTRACT_REDLINE_DIFF" in event_types

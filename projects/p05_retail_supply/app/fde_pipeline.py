@@ -322,3 +322,122 @@ class RetailFDEPipeline:
             "sku_price_after": sku.list_price,
             "audit": audit,
         }
+
+    def simulate_margin_scenarios(
+        self,
+        items: list[dict[str, Any]] | None = None,
+        global_discount_pct: float | None = None,
+        actor: str = "merchandiser-sim",
+    ) -> dict[str, Any]:
+        """Simulate multi-SKU promo & dynamic pricing scenarios with margin-floor guardrail."""
+        if not items:
+            scenarios = [
+                {
+                    "sku_id": sku_id,
+                    "promo_discount_pct": global_discount_pct if global_discount_pct is not None else 0.0,
+                    "proposed_price": None,
+                    "projected_units": None,
+                }
+                for sku_id in sorted(self.ontology.skus)
+            ]
+        else:
+            scenarios = items
+
+        results: list[dict[str, Any]] = []
+        total_revenue = 0.0
+        total_cost = 0.0
+        passed_count = 0
+        blocked_count = 0
+
+        for item in scenarios:
+            sku_id = item["sku_id"]
+            if sku_id not in self.ontology.skus:
+                raise KeyError(f"Unknown SKU: {sku_id}")
+
+            sku = self.ontology.skus[sku_id]
+            discount_pct = float(
+                item.get("promo_discount_pct")
+                if item.get("promo_discount_pct") is not None
+                else (global_discount_pct or 0.0)
+            )
+            base_price = (
+                float(item["proposed_price"])
+                if item.get("proposed_price") is not None
+                else sku.list_price
+            )
+            effective_price = round(base_price * (1.0 - discount_pct), 2)
+            margin_eval = self.evaluate_margin_guardrail(sku, proposed_price=effective_price)
+
+            forecast = self.ontology.forecasts.get(sku_id)
+            default_units = int(round(forecast.projected_demand())) if forecast else 100
+            projected_units = (
+                int(item["projected_units"])
+                if item.get("projected_units") is not None
+                else default_units
+            )
+
+            projected_revenue = round(effective_price * projected_units, 2)
+            projected_cost = round(sku.unit_cost * projected_units, 2)
+            projected_profit = round(projected_revenue - projected_cost, 2)
+
+            if margin_eval["passed"]:
+                passed_count += 1
+                total_revenue += projected_revenue
+                total_cost += projected_cost
+            else:
+                blocked_count += 1
+
+            results.append(
+                {
+                    "sku_id": sku.sku_id,
+                    "sku_name": sku.name,
+                    "category": sku.category,
+                    "unit_cost": sku.unit_cost,
+                    "list_price": sku.list_price,
+                    "promo_discount_pct": discount_pct,
+                    "effective_price": effective_price,
+                    "gross_margin_pct": margin_eval["gross_margin_pct"],
+                    "min_margin_pct": margin_eval["min_margin_pct"],
+                    "guardrail_passed": margin_eval["passed"],
+                    "reason": margin_eval["reason"],
+                    "projected_units": projected_units,
+                    "projected_revenue": projected_revenue,
+                    "projected_cost": projected_cost,
+                    "projected_profit": projected_profit,
+                }
+            )
+
+        total_revenue = round(total_revenue, 2)
+        total_cost = round(total_cost, 2)
+        total_profit = round(total_revenue - total_cost, 2)
+        blended_margin_pct = (
+            round((total_revenue - total_cost) / total_revenue, 4)
+            if total_revenue > 0
+            else 0.0
+        )
+
+        audit = self._record_audit(
+            "MARGIN_SIMULATION_RUN",
+            ",".join(r["sku_id"] for r in results),
+            actor,
+            {
+                "total_skus_simulated": len(results),
+                "guardrail_passed_count": passed_count,
+                "guardrail_blocked_count": blocked_count,
+                "blended_margin_pct": blended_margin_pct,
+            },
+        )
+
+        return {
+            "total_skus_simulated": len(results),
+            "guardrail_passed_count": passed_count,
+            "guardrail_blocked_count": blocked_count,
+            "all_passed": blocked_count == 0,
+            "total_projected_revenue": total_revenue,
+            "total_projected_cost": total_cost,
+            "total_projected_profit": total_profit,
+            "blended_margin_pct": blended_margin_pct,
+            "results": results,
+            "audit": audit,
+        }
+

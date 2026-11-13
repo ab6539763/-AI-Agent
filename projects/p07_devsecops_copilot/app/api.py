@@ -9,6 +9,7 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .fde_pipeline import DevSecOpsFDEPipeline
@@ -41,6 +42,14 @@ class ActionApproveRequest(BaseModel):
     comment: str = Field(default="")
 
 
+class CveGateRequest(BaseModel):
+    service_id: str = Field(..., examples=["svc-checkout"])
+    release_version: str = Field(default="v1.0.0")
+    include_dependencies: bool = Field(default=True)
+    block_threshold: float = Field(default=9.0, ge=0.0, le=10.0)
+    dependency_cvss_overrides: dict[str, float] = Field(default_factory=dict)
+
+
 def create_app(
     wiki_dir: Optional[str | Path] = None,
     seed_demo: bool = True,
@@ -66,13 +75,20 @@ def create_app(
         "wiki_lints_total": 0,
         "triage_total": 0,
         "approvals_total": 0,
+        "cve_gates_total": 0,
         "last_latency_ms": 0.0,
     }
 
     app = FastAPI(
         title="P07 Enterprise DevSecOps Copilot",
-        version="1.0.0",
+        version="2.0.0",
         description="Deterministic DevSecOps Ontology, LLM Wiki, and FDE Triage/HITL API.",
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.state.registry = registry
     app.state.wiki = wiki
@@ -177,6 +193,40 @@ def create_app(
                 comment=payload.comment,
             )
             metrics_state["approvals_total"] += 1
+            return result
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/v1/dashboard/overview")
+    def dashboard_overview() -> dict[str, Any]:
+        return pipeline.get_dashboard_overview()
+
+    @app.get("/api/v1/wiki/pages")
+    def wiki_pages() -> dict[str, Any]:
+        pages = pipeline.list_wiki_pages()
+        return {"pages": pages, "total": len(pages)}
+
+    @app.get("/api/v1/actions/pending")
+    def actions_pending() -> dict[str, Any]:
+        actions = pipeline.list_pending_actions()
+        return {"actions": actions, "total": len(actions)}
+
+    @app.get("/api/v1/audit/logs")
+    def audit_logs() -> dict[str, Any]:
+        logs = pipeline.list_audit_logs()
+        return {"logs": logs, "total": len(logs)}
+
+    @app.post("/api/v1/security/cve-gate")
+    def security_cve_gate(payload: CveGateRequest) -> dict[str, Any]:
+        try:
+            result = pipeline.evaluate_release_cve_gate(
+                service_id=payload.service_id,
+                release_version=payload.release_version,
+                include_dependencies=payload.include_dependencies,
+                block_threshold=payload.block_threshold,
+                dependency_cvss_overrides=payload.dependency_cvss_overrides,
+            )
+            metrics_state["cve_gates_total"] += 1
             return result
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

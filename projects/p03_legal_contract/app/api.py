@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .fde_pipeline import LegalFDEPipeline
@@ -31,6 +32,14 @@ class ContractReviewRequest(BaseModel):
     counterparty: str = "Counterparty Corp."
     jurisdiction: str = "US-NY"
     liability_cap_usd: float | None = None
+    requested_by: str = "legal_ops"
+
+
+class ContractRedlineDiffRequest(BaseModel):
+    contract_id: str = "diff_contract"
+    title: str = "Contract Version Comparison"
+    original_text: str
+    revised_text: str
     requested_by: str = "legal_ops"
 
 
@@ -65,6 +74,12 @@ def create_app(wiki_dir: str | Path | None = None) -> FastAPI:
         title="P03 Legal Compliance & Contract Review Agent",
         version="1.0.0",
         description="Offline deterministic Legal Ontology, LLM Wiki, and FDE Contract Review API.",
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.state.registry = registry
     app.state.wiki = wiki
@@ -180,6 +195,94 @@ def create_app(wiki_dir: str | Path | None = None) -> FastAPI:
                 else None
             ),
         }
+
+    @app.get("/api/v1/dashboard/overview")
+    def dashboard_overview() -> dict[str, Any]:
+        high_risk_clauses = sum(
+            1 for c in registry.clauses.values() if c.risk_level in ("high", "critical")
+        )
+        critical_risk_clauses = sum(
+            1 for c in registry.clauses.values() if c.risk_level == "critical"
+        )
+        active_regulations = sum(
+            1 for r in registry.regulations.values() if r.status == "active"
+        )
+        pending_gc_approvals = sum(
+            1 for a in registry.actions.values() if a.status == "pending"
+        )
+        wiki_pages_count = len(list(wiki.entities_dir.glob("*.md")))
+        return {
+            "contracts_reviewed": counters["contracts_reviewed"],
+            "contracts_total": len(registry.contracts),
+            "clauses_total": len(registry.clauses),
+            "high_risk_clauses": high_risk_clauses,
+            "critical_risk_clauses": critical_risk_clauses,
+            "active_regulations": active_regulations,
+            "regulations_total": len(registry.regulations),
+            "pending_gc_approvals": pending_gc_approvals,
+            "audit_logs_count": len(pipeline.audit_trail),
+            "pii_masked_total": pipeline.pii_masked_total,
+            "wiki_pages_count": wiki_pages_count,
+            "recent_contracts": [
+                {
+                    "id": c.id,
+                    "title": c.title,
+                    "counterparty": c.counterparty,
+                    "jurisdiction": c.jurisdiction,
+                    "status": c.status,
+                }
+                for c in list(registry.contracts.values())[-10:]
+            ],
+        }
+
+    @app.get("/api/v1/wiki/pages")
+    def list_wiki_pages() -> dict[str, Any]:
+        pages: list[dict[str, Any]] = []
+        for md_file in sorted(wiki.entities_dir.glob("*.md")):
+            text = md_file.read_text(encoding="utf-8")
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            title = lines[0].lstrip("# ").strip() if lines else md_file.stem
+            preview = " ".join(lines[1:5])[:240] if len(lines) > 1 else ""
+            pages.append(
+                {
+                    "id": md_file.stem,
+                    "title": title,
+                    "path": str(md_file.relative_to(wiki.root_dir)),
+                    "preview": preview,
+                }
+            )
+        return {"count": len(pages), "pages": pages}
+
+    @app.get("/api/v1/ontology/regulations")
+    def list_ontology_regulations() -> dict[str, Any]:
+        regulations = [r.model_dump() for r in registry.regulations.values()]
+        links = [lnk.model_dump() for lnk in registry.links.values()]
+        return {
+            "count": len(regulations),
+            "regulations": regulations,
+            "links_count": len(links),
+            "links": links,
+        }
+
+    @app.get("/api/v1/actions/pending")
+    def list_pending_actions() -> dict[str, Any]:
+        pending = [a.model_dump() for a in registry.actions.values() if a.status == "pending"]
+        return {"count": len(pending), "actions": pending}
+
+    @app.get("/api/v1/audit/logs")
+    def list_audit_logs(limit: int = Query(default=100, ge=1, le=1000)) -> dict[str, Any]:
+        logs = list(reversed(pipeline.audit_trail))[:limit]
+        return {"count": len(logs), "total": len(pipeline.audit_trail), "logs": logs}
+
+    @app.post("/api/v1/contracts/redline-diff")
+    def contract_redline_diff(payload: ContractRedlineDiffRequest) -> dict[str, Any]:
+        return pipeline.compare_contract_versions(
+            contract_id=payload.contract_id,
+            title=payload.title,
+            original_text=payload.original_text,
+            revised_text=payload.revised_text,
+            requested_by=payload.requested_by,
+        )
 
     return app
 

@@ -8,6 +8,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .fde_pipeline import HealthcareFDEPipeline
@@ -47,6 +48,15 @@ class ActionApproveRequest(BaseModel):
     notes: str = ""
 
 
+class DischargeSummaryRequest(BaseModel):
+    case_id: str = "case-discharge"
+    raw_notes: str
+    diagnosis: str = ""
+    conditions: list[str] = Field(default_factory=list)
+    medications: list[str] = Field(default_factory=list)
+    follow_up_days: int = Field(default=7, ge=1, le=90)
+
+
 def create_app(
     wiki_dir: Path | str | None = None,
     audit_log_path: Path | str | None = None,
@@ -74,12 +84,19 @@ def create_app(
         "blocked_interactions_total": 0,
         "triage_total": 0,
         "hitl_approvals_total": 0,
+        "discharge_summaries_total": 0,
     }
 
     application = FastAPI(
         title="P02 Healthcare & Clinical Decision Support Copilot",
         version="1.0.0",
         description="Offline deterministic Clinical Ontology, LLM Wiki, and FDE HITL Copilot.",
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     application.state.registry = registry
     application.state.wiki = wiki
@@ -112,6 +129,44 @@ def create_app(
     def get_metrics() -> dict[str, int]:
         return dict(metrics)
 
+    @application.get("/api/v1/dashboard/overview")
+    def dashboard_overview() -> dict[str, Any]:
+        wiki_entities = wiki.list_entities()
+        pending_actions = pipeline.list_pending_actions()
+        audit_logs = pipeline.get_audit_log()
+        return {
+            "service": "p02-healthcare-copilot",
+            "guidelines_count": len(registry.guidelines),
+            "medications_count": len(registry.medications),
+            "contraindications_count": len(registry.contraindications),
+            "symptoms_count": len(registry.symptoms),
+            "wiki_pages_count": len(wiki_entities),
+            "pending_hitl_count": len(pending_actions),
+            "audit_logs_count": len(audit_logs),
+            "metrics": dict(metrics),
+        }
+
+    @application.get("/api/v1/wiki/pages")
+    def wiki_pages() -> dict[str, Any]:
+        entities = wiki.list_entities()
+        pages = [
+            {
+                "id": ent["doc_id"],
+                "title": ent["title"],
+                "path": ent["path"],
+                "preview": ent["body"][:200].replace("\n", " ").strip(),
+                "entity_type": ent["entity_type"],
+                "condition": ent["condition"],
+                "medication": ent["medication"],
+                "dose_mg": ent["dose_mg"],
+                "citation": ent["citation"],
+                "wiki_links": ent["wiki_links"],
+                "updated_at": ent["updated_at"],
+            }
+            for ent in entities
+        ]
+        return {"total": len(pages), "pages": pages}
+
     @application.post("/api/v1/wiki/ingest")
     def wiki_ingest(payload: WikiIngestRequest) -> dict[str, Any]:
         try:
@@ -135,6 +190,15 @@ def create_app(
     def wiki_lint() -> dict[str, Any]:
         metrics["wiki_lints_total"] += 1
         return wiki.lint()
+
+    @application.get("/api/v1/ontology/catalog")
+    def ontology_catalog() -> dict[str, Any]:
+        return {
+            "medications": [m.model_dump() for m in registry.medications.values()],
+            "contraindications": [c.model_dump() for c in registry.contraindications],
+            "symptoms": [s.model_dump() for s in registry.symptoms.values()],
+            "guidelines": [g.model_dump() for g in registry.guidelines.values()],
+        }
 
     @application.post("/api/v1/ontology/check-interaction")
     def check_interaction(payload: InteractionCheckRequest) -> dict[str, Any]:
@@ -161,6 +225,26 @@ def create_app(
             metrics["blocked_interactions_total"] += 1
         return result
 
+    @application.post("/api/v1/clinical/discharge-summary")
+    def clinical_discharge_summary(payload: DischargeSummaryRequest) -> dict[str, Any]:
+        metrics["discharge_summaries_total"] += 1
+        return pipeline.generate_discharge_summary(
+            case_id=payload.case_id,
+            raw_notes=payload.raw_notes,
+            diagnosis=payload.diagnosis,
+            conditions=payload.conditions,
+            medications=payload.medications,
+            follow_up_days=payload.follow_up_days,
+        )
+
+    @application.get("/api/v1/actions/pending")
+    def list_pending_actions() -> dict[str, Any]:
+        pending = pipeline.list_pending_actions()
+        return {
+            "total": len(pending),
+            "actions": [action.model_dump() for action in pending],
+        }
+
     @application.post("/api/v1/actions/approve")
     def approve_action(payload: ActionApproveRequest) -> dict[str, Any]:
         try:
@@ -176,6 +260,11 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         metrics["hitl_approvals_total"] += 1
         return {"status": action.status, "action": action.model_dump()}
+
+    @application.get("/api/v1/audit/logs")
+    def audit_logs() -> dict[str, Any]:
+        logs = pipeline.get_audit_log()
+        return {"total": len(logs), "logs": logs}
 
     return application
 

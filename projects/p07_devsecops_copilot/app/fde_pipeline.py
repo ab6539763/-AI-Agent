@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timezone
 import re
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
 from .llm_wiki import DevSecOpsLLMWiki
@@ -189,5 +190,180 @@ class DevSecOpsFDEPipeline:
             "approved_by": action.approved_by,
             "decided_at": action.decided_at,
             "comment": redacted_comment,
+            "audit_id": audit_entry["audit_id"],
+        }
+
+    def get_dashboard_overview(self) -> dict[str, Any]:
+        """Return enterprise DevSecOps KPIs and registered service inventory."""
+        critical_cves = [
+            cve
+            for cve in self.registry.cves.values()
+            if not cve.patched and (cve.cvss_score >= 9.0 or cve.severity == "CRITICAL")
+        ]
+        active_incidents = [
+            inc for inc in self.registry.incidents.values() if inc.status != "RESOLVED"
+        ]
+        pending_actions = [
+            act for act in self.registry.ops_actions.values() if act.status == "PENDING_APPROVAL"
+        ]
+        wiki_pages_count = len(list(self.wiki.entities_dir.glob("*.md")))
+        services = [
+            {
+                "service_id": svc.service_id,
+                "name": svc.name,
+                "tier": svc.tier,
+                "owner_team": svc.owner_team,
+                "environment": svc.environment,
+                "runbook_id": svc.runbook_id,
+            }
+            for svc in sorted(self.registry.services.values(), key=lambda s: s.service_id)
+        ]
+        return {
+            "services_total": len(self.registry.services),
+            "critical_cves_total": len(critical_cves),
+            "active_incidents_total": len(active_incidents),
+            "pending_hitl_rollbacks": len(pending_actions),
+            "audit_logs_total": len(self.audit_trail),
+            "wiki_pages_total": wiki_pages_count,
+            "services": services,
+        }
+
+    def list_wiki_pages(self) -> list[dict[str, Any]]:
+        """List all Runbook/Postmortem/Service/CVE Markdown wiki pages."""
+        pages: list[dict[str, Any]] = []
+        for path in sorted(self.wiki.entities_dir.glob("*.md")):
+            info = self.wiki._parse_entity_header(path)
+            text = path.read_text(encoding="utf-8")
+            preview_lines = [
+                line.strip()
+                for line in text.splitlines()
+                if line.strip() and not line.startswith("#") and not line.startswith("- **")
+            ]
+            preview = " ".join(preview_lines)[:220]
+            pages.append(
+                {
+                    "id": info["entity_id"],
+                    "entity_type": info["entity_type"],
+                    "title": info["title"],
+                    "path": f"entities/{path.name}",
+                    "preview": preview,
+                    "content": text,
+                }
+            )
+        return pages
+
+    def list_pending_actions(self) -> list[dict[str, Any]]:
+        """List pending SRE HITL rollback/quarantine actions."""
+        pending = [
+            {
+                "action_id": act.action_id,
+                "action_type": act.action_type,
+                "target_service_id": act.target_service_id,
+                "environment": act.environment,
+                "requires_hitl": act.requires_hitl,
+                "status": act.status,
+                "requested_by": act.requested_by,
+                "reason": act.reason,
+                "created_at": act.created_at,
+            }
+            for act in self.registry.ops_actions.values()
+            if act.status == "PENDING_APPROVAL"
+        ]
+        pending.sort(key=lambda a: a["created_at"], reverse=True)
+        return pending
+
+    def list_audit_logs(self) -> list[dict[str, Any]]:
+        """List secret-redacted audit log entries (newest first)."""
+        return list(reversed(self.audit_trail))
+
+    def _collect_downstream_services(self, service_id: str) -> list[str]:
+        """Collect service_id and all transitive downstream dependencies."""
+        forward_adj: dict[str, list[str]] = {}
+        for link in self.registry.dependencies:
+            forward_adj.setdefault(link.source_service_id, []).append(link.target_service_id)
+
+        visited: list[str] = [service_id]
+        seen = {service_id}
+        queue: deque[str] = deque([service_id])
+        while queue:
+            current = queue.popleft()
+            for dep in forward_adj.get(current, []):
+                if dep not in seen:
+                    seen.add(dep)
+                    visited.append(dep)
+                    queue.append(dep)
+        return visited
+
+    def evaluate_release_cve_gate(
+        self,
+        service_id: str,
+        release_version: str = "v1.0.0",
+        include_dependencies: bool = True,
+        block_threshold: float = 9.0,
+        dependency_cvss_overrides: Optional[dict[str, float]] = None,
+    ) -> dict[str, Any]:
+        """Evaluate CI/CD release CVE gate across service and its downstream dependencies."""
+        if service_id not in self.registry.services:
+            raise KeyError(f"Unknown service_id: {service_id}")
+
+        checked_services = (
+            self._collect_downstream_services(service_id)
+            if include_dependencies
+            else [service_id]
+        )
+        blocking_cves: list[dict[str, Any]] = []
+        max_cvss = 0.0
+
+        for svc_id in checked_services:
+            for cve in self.registry.cves.values():
+                if cve.service_id == svc_id and not cve.patched:
+                    max_cvss = max(max_cvss, cve.cvss_score)
+                    if cve.cvss_score >= block_threshold:
+                        blocking_cves.append(
+                            {
+                                "cve_id": cve.cve_id,
+                                "service_id": cve.service_id,
+                                "cvss_score": cve.cvss_score,
+                                "severity": cve.severity,
+                                "remediation": cve.remediation,
+                            }
+                        )
+
+        for dep_name, score in (dependency_cvss_overrides or {}).items():
+            max_cvss = max(max_cvss, score)
+            if score >= block_threshold:
+                blocking_cves.append(
+                    {
+                        "cve_id": f"CVE-OVERRIDE-{dep_name.upper()}",
+                        "service_id": dep_name,
+                        "cvss_score": score,
+                        "severity": "CRITICAL" if score >= 9.0 else "HIGH",
+                        "remediation": f"Upgrade {dep_name} to patched release",
+                    }
+                )
+
+        decision = "BLOCK_DEPLOY" if blocking_cves else "ALLOW"
+        audit_entry = self._record_audit(
+            "CVE_GATE_EVALUATION",
+            "ci-cd-gate",
+            {
+                "service_id": service_id,
+                "release_version": release_version,
+                "decision": decision,
+                "max_cvss": max_cvss,
+                "block_threshold": block_threshold,
+                "checked_services": checked_services,
+            },
+        )
+
+        return {
+            "service_id": service_id,
+            "release_version": release_version,
+            "decision": decision,
+            "allowed": decision == "ALLOW",
+            "max_cvss": max_cvss,
+            "block_threshold": block_threshold,
+            "checked_services": checked_services,
+            "blocking_cves": blocking_cves,
             "audit_id": audit_entry["audit_id"],
         }

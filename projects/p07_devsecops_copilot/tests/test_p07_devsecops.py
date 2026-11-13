@@ -239,3 +239,148 @@ def test_fastapi_wiki_ontology_triage_and_approve_flow(tmp_path: Path) -> None:
     )
     assert r_approve.status_code == 200
     assert r_approve.json()["status"] == "REJECTED"
+
+
+def test_fastapi_cors_headers(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path / "wiki", seed_demo=True)
+    client = TestClient(app)
+
+    r_preflight = client.options(
+        "/api/v1/dashboard/overview",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    assert r_preflight.status_code == 200
+    assert r_preflight.headers.get("access-control-allow-origin") == "*"
+
+    r_get = client.get("/health", headers={"Origin": "http://localhost:5173"})
+    assert r_get.status_code == 200
+    assert r_get.headers.get("access-control-allow-origin") == "*"
+
+
+def test_fastapi_dashboard_wiki_pages_pending_and_audit(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path / "wiki", seed_demo=True)
+    client = TestClient(app)
+
+    # 1. Dashboard overview KPIs
+    r_overview = client.get("/api/v1/dashboard/overview")
+    assert r_overview.status_code == 200
+    overview = r_overview.json()
+    assert overview["services_total"] == 4
+    assert overview["critical_cves_total"] == 1
+    assert overview["pending_hitl_rollbacks"] == 0
+    assert len(overview["services"]) == 4
+
+    # 2. Wiki pages list
+    r_pages = client.get("/api/v1/wiki/pages")
+    assert r_pages.status_code == 200
+    pages_data = r_pages.json()
+    assert pages_data["total"] >= 7
+    first_page = pages_data["pages"][0]
+    assert {"id", "title", "path", "preview"}.issubset(first_page.keys())
+
+    # 3. Trigger HITL triage -> appears in /api/v1/actions/pending
+    r_triage = client.post(
+        "/api/v1/incidents/triage",
+        json={
+            "service_id": "svc-payment",
+            "symptom": "Ledger timeout with sk-testkey1234567890abcdef",
+            "severity": "SEV-1",
+            "proposed_action": "rollback",
+            "environment": "prod",
+        },
+    )
+    assert r_triage.status_code == 200
+    action_id = r_triage.json()["action"]["action_id"]
+
+    r_pending = client.get("/api/v1/actions/pending")
+    assert r_pending.status_code == 200
+    pending_data = r_pending.json()
+    assert pending_data["total"] == 1
+    assert pending_data["actions"][0]["action_id"] == action_id
+
+    # 4. Approve action -> removed from pending, recorded in audit logs
+    r_approve = client.post(
+        "/api/v1/actions/approve",
+        json={
+            "action_id": action_id,
+            "approved": True,
+            "approver": "sre-lead-carol",
+            "comment": "Approved rollback with token=mysecret12345",
+        },
+    )
+    assert r_approve.status_code == 200
+    assert r_approve.json()["status"] == "EXECUTED"
+
+    r_pending_after = client.get("/api/v1/actions/pending")
+    assert r_pending_after.status_code == 200
+    assert r_pending_after.json()["total"] == 0
+
+    r_audit = client.get("/api/v1/audit/logs")
+    assert r_audit.status_code == 200
+    audit_data = r_audit.json()
+    assert audit_data["total"] == 2
+    serialized = str(audit_data)
+    assert "sk-testkey1234567890abcdef" not in serialized
+    assert "mysecret12345" not in serialized
+
+
+def test_fastapi_security_cve_gate(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path / "wiki", seed_demo=True)
+    client = TestClient(app)
+
+    # Transitive dependency on svc-auth (CVE-2026-1042 CVSS 9.4) -> BLOCK_DEPLOY
+    r_blocked = client.post(
+        "/api/v1/security/cve-gate",
+        json={
+            "service_id": "svc-checkout",
+            "release_version": "v2.4.0",
+            "include_dependencies": True,
+            "block_threshold": 9.0,
+        },
+    )
+    assert r_blocked.status_code == 200
+    blocked_data = r_blocked.json()
+    assert blocked_data["decision"] == "BLOCK_DEPLOY"
+    assert blocked_data["allowed"] is False
+    assert blocked_data["max_cvss"] == 9.4
+    assert any(c["cve_id"] == "CVE-2026-1042" for c in blocked_data["blocking_cves"])
+
+    # Direct service only (svc-checkout has only patched CVE) -> ALLOW
+    r_allow = client.post(
+        "/api/v1/security/cve-gate",
+        json={
+            "service_id": "svc-checkout",
+            "release_version": "v2.4.0",
+            "include_dependencies": False,
+            "block_threshold": 9.0,
+        },
+    )
+    assert r_allow.status_code == 200
+    allow_data = r_allow.json()
+    assert allow_data["decision"] == "ALLOW"
+    assert allow_data["allowed"] is True
+
+    # Dependency CVSS override -> BLOCK_DEPLOY
+    r_override = client.post(
+        "/api/v1/security/cve-gate",
+        json={
+            "service_id": "svc-checkout",
+            "release_version": "v2.4.1",
+            "include_dependencies": False,
+            "dependency_cvss_overrides": {"lib-openssl": 9.8},
+        },
+    )
+    assert r_override.status_code == 200
+    assert r_override.json()["decision"] == "BLOCK_DEPLOY"
+
+    # Unknown service -> 404
+    r_404 = client.post(
+        "/api/v1/security/cve-gate",
+        json={"service_id": "svc-nonexistent"},
+    )
+    assert r_404.status_code == 404
+

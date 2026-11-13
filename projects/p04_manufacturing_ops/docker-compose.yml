@@ -1,11 +1,11 @@
 services:
-  manufacturing-ops:
+  backend:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: p04-manufacturing-ops
+    container_name: p04-manufacturing-ops-backend
     ports:
-      - "${APP_PORT:-8004}:8000"
+      - "${APP_PORT:-8000}:8000"
     environment:
       APP_ENV: ${APP_ENV:-production}
       APP_HOST: 0.0.0.0
@@ -21,6 +21,18 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: p04-manufacturing-ops-frontend
+    ports:
+      - "${P04_FRONTEND_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   wiki_data:

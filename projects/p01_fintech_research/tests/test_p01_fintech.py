@@ -355,3 +355,184 @@ def test_fastapi_structured_error_handling(tmp_path: Path) -> None:
     )
     assert r_act_404.status_code == 404
     assert r_act_404.json()["error"] == "NotFound"
+
+
+def test_fastapi_cors_headers(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    r_preflight = client.options(
+        "/api/v1/dashboard/overview",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    assert r_preflight.status_code == 200
+    assert r_preflight.headers.get("access-control-allow-origin") in ("*", "http://localhost:5173")
+
+    r_get = client.get("/health", headers={"Origin": "http://localhost:5173"})
+    assert r_get.status_code == 200
+    assert r_get.headers.get("access-control-allow-origin") in ("*", "http://localhost:5173")
+
+
+def test_fastapi_enterprise_dashboard_wiki_actions_and_audit(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    # Ingest entity into wiki & ontology
+    r_ing = client.post(
+        "/api/v1/wiki/ingest",
+        json={
+            "doc_id": "doc_ent_1",
+            "title": "Epsilon Pay Q4",
+            "content": "Epsilon Pay liquidity and leverage filing.",
+            "entities": [
+                {
+                    "id": "issuer_epsilon",
+                    "name": "Epsilon Pay",
+                    "type": "Issuer",
+                    "ticker": "EPSI",
+                    "sector": "Payments",
+                    "credit_rating": "BBB",
+                    "period": "2025-Q4",
+                    "metrics": {"roe": 0.08},
+                }
+            ],
+        },
+    )
+    assert r_ing.status_code == 200
+
+    # Trigger risk signal + pending HITL action
+    r_query = client.post(
+        "/api/v1/research/query",
+        json={
+            "question": "Evaluate Epsilon Pay debt coverage",
+            "issuer_id": "issuer_epsilon",
+            "financials": {
+                "total_debt": 320.0,
+                "shareholders_equity": 100.0,
+                "current_assets": 80.0,
+                "current_liabilities": 100.0,
+                "ebit": 10.0,
+                "interest_expense": 10.0,
+                "net_income": 8.0,
+            },
+            "period": "2025-Q4",
+        },
+    )
+    assert r_query.status_code == 200
+    action_id = r_query.json()["hitl_pending_action"]["action_id"]
+
+    # 1. Dashboard overview KPIs
+    r_dash = client.get("/api/v1/dashboard/overview")
+    assert r_dash.status_code == 200
+    dash = r_dash.json()
+    assert dash["total_issuers"] == 1
+    assert dash["risk_signals"] >= 2
+    assert dash["wiki_pages_count"] == 1
+    assert dash["pending_hitl_count"] == 1
+    assert dash["audit_events_count"] >= 2
+
+    # 2. Wiki pages listing
+    r_pages = client.get("/api/v1/wiki/pages")
+    assert r_pages.status_code == 200
+    pages_data = r_pages.json()
+    assert pages_data["total"] == 1
+    page = pages_data["pages"][0]
+    assert page["id"] == "issuer_epsilon"
+    assert page["title"] == "Epsilon Pay"
+    assert page["path"].endswith("issuer_epsilon.md")
+    assert len(page["preview"]) > 0
+
+    # 3. Pending HITL actions
+    r_pending = client.get("/api/v1/actions/pending")
+    assert r_pending.status_code == 200
+    assert r_pending.json()["total"] == 1
+    assert r_pending.json()["actions"][0]["action_id"] == action_id
+
+    # Approve action and verify pending queue clears
+    r_approve = client.post(
+        "/api/v1/actions/approve",
+        json={
+            "action_id": action_id,
+            "decision": "approve",
+            "actor_role": "compliance_officer",
+            "approver": "cco.li",
+            "comment": "Reviewed Q4 risk",
+        },
+    )
+    assert r_approve.status_code == 200
+    assert client.get("/api/v1/actions/pending").json()["total"] == 0
+
+    # 4. Audit logs
+    r_logs = client.get("/api/v1/audit/logs", params={"limit": 10})
+    assert r_logs.status_code == 200
+    logs_data = r_logs.json()
+    assert logs_data["total"] >= 3
+    assert logs_data["logs"][0]["event_type"] == "HITL_DECISION"
+
+
+def test_fastapi_batch_screen(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    r_batch = client.post(
+        "/api/v1/research/batch-screen",
+        json={
+            "actor_role": "risk_analyst",
+            "items": [
+                {
+                    "issuer_id": "issuer_safe",
+                    "name": "Safe FinTech",
+                    "ticker": "SAFE",
+                    "sector": "Payments",
+                    "credit_rating": "AA",
+                    "period": "2025-Q4",
+                    "financials": {
+                        "total_debt": 50.0,
+                        "shareholders_equity": 100.0,
+                        "current_assets": 180.0,
+                        "current_liabilities": 100.0,
+                        "ebit": 40.0,
+                        "interest_expense": 5.0,
+                        "net_income": 25.0,
+                    },
+                },
+                {
+                    "issuer_id": "issuer_risky",
+                    "name": "Risky Credit",
+                    "ticker": "RISK",
+                    "sector": "Lending",
+                    "credit_rating": "BB",
+                    "period": "2025-Q4",
+                    "financials": {
+                        "total_debt": 350.0,
+                        "shareholders_equity": 100.0,
+                        "current_assets": 75.0,
+                        "current_liabilities": 100.0,
+                        "ebit": 10.0,
+                        "interest_expense": 10.0,
+                        "net_income": 2.0,
+                    },
+                },
+            ],
+        },
+    )
+    assert r_batch.status_code == 200
+    data = r_batch.json()
+    assert data["status"] == "completed"
+    assert data["screened_count"] == 2
+    assert data["high_risk_count"] == 1
+
+    by_id = {item["issuer_id"]: item for item in data["results"]}
+    assert by_id["issuer_safe"]["risk_level"] == "LOW"
+    assert by_id["issuer_safe"]["hitl_pending_action"] is None
+    assert by_id["issuer_risky"]["risk_level"] == "CRITICAL"
+    assert by_id["issuer_risky"]["hitl_pending_action"] is not None
+
+    dash = client.get("/api/v1/dashboard/overview").json()
+    assert dash["total_issuers"] == 2
+    assert dash["pending_hitl_count"] == 1
+

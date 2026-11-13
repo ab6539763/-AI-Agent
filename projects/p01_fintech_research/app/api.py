@@ -8,12 +8,13 @@ from typing import Any, Optional
 import uuid
 
 from fastapi import FastAPI, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from app.fde_pipeline import FinTechFDEPipeline
 from app.llm_wiki import FinTechLLMWiki
-from app.ontology import OntologyRegistry
+from app.ontology import ActionStatus, Issuer, OntologyRegistry
 
 
 class WikiIngestRequest(BaseModel):
@@ -40,6 +41,21 @@ class ActionApproveRequest(BaseModel):
     comment: str = Field(default="")
 
 
+class BatchScreenItem(BaseModel):
+    issuer_id: str = Field(..., min_length=1)
+    name: Optional[str] = None
+    ticker: Optional[str] = None
+    sector: str = Field(default="FinTech")
+    credit_rating: str = Field(default="A")
+    period: str = Field(default="2025-Q4")
+    financials: dict[str, float] = Field(default_factory=dict)
+
+
+class BatchScreenRequest(BaseModel):
+    items: list[BatchScreenItem] = Field(..., min_length=1, max_length=100)
+    actor_role: str = Field(default="analyst")
+
+
 def create_app(data_dir: Optional[Path | str] = None) -> FastAPI:
     resolved_dir = Path(
         data_dir or os.environ.get("P01_DATA_DIR", "/tmp/p01_fintech_research_data")
@@ -59,12 +75,19 @@ def create_app(data_dir: Optional[Path | str] = None) -> FastAPI:
         "research_queries_total": 0,
         "guardrail_blocks_total": 0,
         "actions_decided_total": 0,
+        "batch_screens_total": 0,
     }
 
     app = FastAPI(
         title="P01 FinTech Research & Compliance Agent",
-        version="1.0.0",
+        version="1.1.0",
         description="Offline deterministic FinTech investment research, Ontology, LLM Wiki, and HITL compliance API.",
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.state.pipeline = pipeline
     app.state.wiki = wiki
@@ -126,6 +149,46 @@ def create_app(data_dir: Optional[Path | str] = None) -> FastAPI:
             "audit_events": len(pipeline.read_audit_trail()),
         }
 
+    @app.get("/api/v1/dashboard/overview")
+    def dashboard_overview() -> dict[str, Any]:
+        pending_hitl = sum(
+            1 for a in pipeline.approval_queue.values() if a.status == ActionStatus.PENDING
+        )
+        return {
+            "total_issuers": len(ontology.issuers),
+            "risk_signals": len(ontology.risk_signals),
+            "wiki_pages_count": len(list(wiki.entities_dir.glob("*.md"))),
+            "pending_hitl_count": pending_hitl,
+            "audit_events_count": len(pipeline.read_audit_trail()),
+            "ontology_links_count": len(ontology.links),
+        }
+
+    @app.get("/api/v1/wiki/pages")
+    def wiki_pages() -> dict[str, Any]:
+        pages: list[dict[str, Any]] = []
+        for path in sorted(wiki.entities_dir.glob("*.md")):
+            meta = wiki._parse_entity_page(path)
+            raw_text = meta.get("raw", "")
+            preview_lines = [
+                ln.strip()
+                for ln in raw_text.splitlines()
+                if ln.strip() and not ln.strip().startswith("---")
+            ]
+            preview = " ".join(preview_lines)[:220]
+            pages.append(
+                {
+                    "id": meta["id"],
+                    "title": meta["name"],
+                    "path": str(path.relative_to(wiki.wiki_dir)),
+                    "preview": preview,
+                    "type": meta.get("type", "Issuer"),
+                    "updated_at": meta.get("updated_at", ""),
+                    "metrics": meta.get("metrics", {}),
+                    "links": meta.get("links", []),
+                }
+            )
+        return {"pages": pages, "total": len(pages)}
+
     @app.post("/api/v1/wiki/ingest")
     def wiki_ingest(payload: WikiIngestRequest) -> dict[str, Any]:
         res = pipeline.ingest_document(
@@ -169,6 +232,78 @@ def create_app(data_dir: Optional[Path | str] = None) -> FastAPI:
             metrics_state["guardrail_blocks_total"] += 1
         return res
 
+    @app.post("/api/v1/research/batch-screen")
+    def research_batch_screen(payload: BatchScreenRequest) -> dict[str, Any]:
+        metrics_state["batch_screens_total"] += 1
+        results: list[dict[str, Any]] = []
+        high_risk_count = 0
+
+        for item in payload.items:
+            if item.issuer_id not in ontology.issuers:
+                ontology.register_issuer(
+                    Issuer(
+                        issuer_id=item.issuer_id,
+                        name=item.name or item.issuer_id,
+                        ticker=item.ticker or item.issuer_id.upper()[:8],
+                        sector=item.sector,
+                        credit_rating=item.credit_rating,
+                    )
+                )
+            ratio_res = pipeline.compute_financial_ratios(
+                issuer_id=item.issuer_id,
+                period=item.period,
+                financials=item.financials,
+                register_in_ontology=True,
+            )
+            act = pipeline._maybe_enqueue_hitl_action(item.issuer_id)
+            severities = {r["severity"] for r in ratio_res["triggered_risks"]}
+            if "CRITICAL" in severities:
+                risk_level = "CRITICAL"
+                high_risk_count += 1
+            elif "HIGH" in severities:
+                risk_level = "HIGH"
+                high_risk_count += 1
+            else:
+                risk_level = "LOW"
+
+            results.append(
+                {
+                    "issuer_id": item.issuer_id,
+                    "name": ontology.issuers[item.issuer_id].name,
+                    "period": item.period,
+                    "risk_level": risk_level,
+                    "ratios": ratio_res["ratios"],
+                    "triggered_risks": ratio_res["triggered_risks"],
+                    "hitl_pending_action": act.model_dump() if act is not None else None,
+                }
+            )
+
+        audit = pipeline._write_audit(
+            "BATCH_SCREEN_COMPLETED",
+            {
+                "actor_role": payload.actor_role,
+                "screened_count": len(results),
+                "high_risk_count": high_risk_count,
+                "issuer_ids": [r["issuer_id"] for r in results],
+            },
+        )
+        return {
+            "status": "completed",
+            "screened_count": len(results),
+            "high_risk_count": high_risk_count,
+            "results": results,
+            "audit_event_id": audit["event_id"],
+        }
+
+    @app.get("/api/v1/actions/pending")
+    def actions_pending() -> dict[str, Any]:
+        pending = [
+            a.model_dump()
+            for a in pipeline.approval_queue.values()
+            if a.status == ActionStatus.PENDING
+        ]
+        return {"actions": pending, "total": len(pending)}
+
     @app.post("/api/v1/actions/approve")
     def actions_approve(payload: ActionApproveRequest) -> dict[str, Any]:
         res = pipeline.approve_action(
@@ -180,6 +315,12 @@ def create_app(data_dir: Optional[Path | str] = None) -> FastAPI:
         )
         metrics_state["actions_decided_total"] += 1
         return res
+
+    @app.get("/api/v1/audit/logs")
+    def audit_logs(limit: int = Query(default=50, ge=1, le=500)) -> dict[str, Any]:
+        records = pipeline.read_audit_trail()
+        recent = list(reversed(records[-limit:]))
+        return {"logs": recent, "total": len(records)}
 
     return app
 

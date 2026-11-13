@@ -286,3 +286,136 @@ def test_api_error_handling_for_missing_equipment_and_double_approval(
         json={"action_id": action_id, "approved": False, "safety_officer": "officer-b"},
     )
     assert r_second.status_code == 409
+
+
+def test_cors_headers_and_dashboard_overview(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path / "cors_wiki")
+    client = TestClient(app)
+
+    r_preflight = client.options(
+        "/api/v1/dashboard/overview",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert r_preflight.status_code == 200
+    assert r_preflight.headers.get("access-control-allow-origin") == "*"
+
+    r_overview = client.get(
+        "/api/v1/dashboard/overview",
+        headers={"Origin": "http://localhost:5173"},
+    )
+    assert r_overview.status_code == 200
+    assert r_overview.headers.get("access-control-allow-origin") == "*"
+    data = r_overview.json()
+    assert data["equipment_count"] >= 2
+    assert data["fault_codes_count"] >= 4
+    assert data["sops_count"] >= 3
+    assert data["wiki_pages_count"] >= 9
+    assert data["pending_hitl_shutdowns"] == 0
+    assert data["audit_logs_count"] == 0
+
+
+def test_wiki_pages_pending_actions_and_audit_logs(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path / "enterprise_wiki")
+    client = TestClient(app)
+
+    r_pages = client.get("/api/v1/wiki/pages")
+    assert r_pages.status_code == 200
+    pages_body = r_pages.json()
+    assert pages_body["total"] >= 9
+    first_page = pages_body["pages"][0]
+    assert {"id", "title", "path", "preview"}.issubset(first_page.keys())
+
+    # Trigger HITL emergency shutdown
+    r_inc = client.post(
+        "/api/v1/ops/incident",
+        json={
+            "equipment_id": "CNC-LINE1-01",
+            "sensor_readings": {"temperature_c": 95.0},
+            "reporter": "plc-line1",
+        },
+    )
+    assert r_inc.status_code == 200
+    action_id = r_inc.json()["action"]["action_id"]
+
+    r_pending = client.get("/api/v1/actions/pending")
+    assert r_pending.status_code == 200
+    assert r_pending.json()["total"] == 1
+    assert r_pending.json()["actions"][0]["action_id"] == action_id
+
+    # Approve and verify pending clears and audit logs record both events
+    r_app = client.post(
+        "/api/v1/actions/approve",
+        json={
+            "action_id": action_id,
+            "approved": True,
+            "safety_officer": "officer-chen",
+            "reason": "Verified thermal anomaly",
+        },
+    )
+    assert r_app.status_code == 200
+
+    r_pending_after = client.get("/api/v1/actions/pending")
+    assert r_pending_after.status_code == 200
+    assert r_pending_after.json()["total"] == 0
+
+    r_audit = client.get("/api/v1/audit/logs")
+    assert r_audit.status_code == 200
+    logs = r_audit.json()["logs"]
+    event_types = [entry["event_type"] for entry in logs]
+    assert "HITL_GATE_TRIGGERED" in event_types
+    assert "HITL_DECISION" in event_types
+
+
+def test_predictive_maintenance_batch_and_error_handling(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path / "pm_wiki")
+    client = TestClient(app)
+
+    # Default empty body evaluates all seeded equipment
+    r_default = client.post("/api/v1/ops/predictive-maintenance", json={})
+    assert r_default.status_code == 200
+    default_body = r_default.json()
+    assert default_body["equipment_evaluated"] >= 2
+    assert len(default_body["schedules"]) >= 2
+
+    # Batch telemetry evaluation with critical and nominal equipment
+    r_batch = client.post(
+        "/api/v1/ops/predictive-maintenance",
+        json={
+            "samples": [
+                {
+                    "equipment_id": "CNC-LINE1-01",
+                    "readings": {"temperature_c": 95.0, "vibration_mms": 8.5},
+                    "operating_hours": 1500.0,
+                },
+                {
+                    "equipment_id": "MOLD-LINE2-01",
+                    "readings": {"pressure_bar": 120.0, "temperature_c": 55.0},
+                    "operating_hours": 100.0,
+                },
+            ]
+        },
+    )
+    assert r_batch.status_code == 200
+    batch_body = r_batch.json()
+    assert batch_body["equipment_evaluated"] == 2
+    assert batch_body["critical_count"] == 1
+    cnc_sched = next(
+        s for s in batch_body["schedules"] if s["equipment_id"] == "CNC-LINE1-01"
+    )
+    mold_sched = next(
+        s for s in batch_body["schedules"] if s["equipment_id"] == "MOLD-LINE2-01"
+    )
+    assert cnc_sched["risk_tier"] == "CRITICAL"
+    assert cnc_sched["health_score"] < mold_sched["health_score"]
+    assert cnc_sched["estimated_mtbf_hours"] < mold_sched["estimated_mtbf_hours"]
+
+    # Unknown equipment returns 404
+    r_unknown = client.post(
+        "/api/v1/ops/predictive-maintenance",
+        json={"samples": [{"equipment_id": "NO-SUCH-EQ", "readings": {}}]},
+    )
+    assert r_unknown.status_code == 404
+

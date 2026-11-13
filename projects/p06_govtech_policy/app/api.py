@@ -9,9 +9,15 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from .fde_pipeline import GovTechFDEPipeline, PolicyAskResponse
+from .fde_pipeline import (
+    AuditEvent,
+    BatchMatchResponse,
+    GovTechFDEPipeline,
+    PolicyAskResponse,
+)
 from .llm_wiki import GovTechLLMWiki, LintReport
 from .ontology import (
     CitizenProfile,
@@ -71,6 +77,41 @@ class ActionApproveRequest(BaseModel):
     note: str = ""
 
 
+class WikiPageSummary(BaseModel):
+    id: str
+    title: str
+    path: str
+    preview: str
+    department: str = "市政务服务和数据管理局"
+    entity_type: str = "policy"
+    effective_date: str = "2026-01-01"
+    expiry_date: str | None = None
+    wiki_links: list[str] = Field(default_factory=list)
+
+
+class BatchMatchRequest(BaseModel):
+    profiles: list[CitizenProfile]
+    program_ids: list[str] | None = None
+
+
+class DashboardOverview(BaseModel):
+    service: str
+    active_policies: int
+    total_policies: int
+    benefit_programs: int
+    eligibility_rules: int
+    wiki_pages: int
+    pending_hitl_reviews: int
+    approved_hitl_reviews: int
+    rejected_hitl_reviews: int
+    audit_logs_count: int
+    departments: list[str] = Field(default_factory=list)
+    policies: list[dict[str, Any]] = Field(default_factory=list)
+    programs: list[dict[str, Any]] = Field(default_factory=list)
+    rules: list[dict[str, Any]] = Field(default_factory=list)
+    ontology_links: list[dict[str, Any]] = Field(default_factory=list)
+
+
 def _seed_wiki_from_registry(wiki: GovTechLLMWiki, registry: GovOntologyRegistry) -> None:
     if wiki.list_entities():
         return
@@ -123,12 +164,20 @@ def create_app(
         "policy_asks_total": 0,
         "policy_refusals_total": 0,
         "hitl_approvals_total": 0,
+        "batch_matches_total": 0,
     }
 
     application = FastAPI(
         title="P06 GovTech Policy & Citizen/Enterprise Service Agent",
         version="1.0.0",
         description="政务服务与企业政策通智能体：本体资格核验、政策知识库与合规人工复核",
+    )
+
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     application.state.registry = registry
@@ -247,6 +296,139 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         metrics["hitl_approvals_total"] += 1
         return action
+
+    @application.get("/api/v1/dashboard/overview", response_model=DashboardOverview)
+    def dashboard_overview() -> DashboardOverview:
+        active_policies = sum(
+            1 for p in registry.policies.values() if p.status == "active"
+        )
+        pending_hitl = sum(
+            1 for a in registry.actions.values() if a.status == "pending_approval"
+        )
+        approved_hitl = sum(
+            1 for a in registry.actions.values() if a.status == "approved"
+        )
+        rejected_hitl = sum(
+            1 for a in registry.actions.values() if a.status == "rejected"
+        )
+        departments = sorted(
+            {p.department for p in registry.policies.values()}
+            | {prog.department for prog in registry.programs.values()}
+        )
+        return DashboardOverview(
+            service="p06-govtech-policy",
+            active_policies=active_policies,
+            total_policies=len(registry.policies),
+            benefit_programs=len(registry.programs),
+            eligibility_rules=len(registry.rules),
+            wiki_pages=len(wiki.list_entities()),
+            pending_hitl_reviews=pending_hitl,
+            approved_hitl_reviews=approved_hitl,
+            rejected_hitl_reviews=rejected_hitl,
+            audit_logs_count=len(pipeline.audit_trail),
+            departments=departments,
+            policies=[
+                {
+                    "policy_id": p.policy_id,
+                    "title": p.title,
+                    "department": p.department,
+                    "status": p.status,
+                    "effective_date": p.effective_date,
+                    "expiry_date": p.expiry_date,
+                    "tags": p.tags,
+                }
+                for p in registry.policies.values()
+            ],
+            programs=[
+                {
+                    "program_id": prog.program_id,
+                    "name": prog.name,
+                    "department": prog.department,
+                    "policy_id": prog.policy_id,
+                    "max_subsidy_amount": prog.max_subsidy_amount,
+                    "requires_hitl": prog.requires_hitl,
+                    "hitl_threshold_amount": prog.hitl_threshold_amount,
+                    "active": prog.active,
+                }
+                for prog in registry.programs.values()
+            ],
+            rules=[
+                {
+                    "rule_id": r.rule_id,
+                    "program_id": r.program_id,
+                    "policy_id": r.policy_id,
+                    "field": r.field,
+                    "operator": r.operator,
+                    "value": r.value,
+                    "clause_ref": r.clause_ref,
+                    "description": r.description,
+                }
+                for r in registry.rules.values()
+            ],
+            ontology_links=[
+                {
+                    "source_id": lnk.source_id,
+                    "target_id": lnk.target_id,
+                    "relation_type": lnk.relation_type,
+                }
+                for lnk in registry.links
+            ],
+        )
+
+    @application.get("/api/v1/wiki/pages", response_model=list[WikiPageSummary])
+    def list_wiki_pages() -> list[WikiPageSummary]:
+        pages: list[WikiPageSummary] = []
+        for doc_id in wiki.list_entities():
+            md_path = wiki.entities_dir / f"{doc_id}.md"
+            text = md_path.read_text(encoding="utf-8")
+            meta = wiki._meta_cache.get(doc_id)
+            title = meta.title if meta else doc_id
+            body_lines = [
+                ln.strip()
+                for ln in text.splitlines()
+                if ln.strip() and not ln.startswith("#") and not ln.startswith("- **")
+            ]
+            preview = " ".join(body_lines)[:220]
+            import re as _re
+
+            wiki_links = _re.findall(r"\[\[([^\]]+)\]\]", text)
+            pages.append(
+                WikiPageSummary(
+                    id=doc_id,
+                    title=title,
+                    path=str(md_path),
+                    preview=preview,
+                    department=meta.department if meta else "市政务服务和数据管理局",
+                    entity_type=meta.entity_type if meta else "policy",
+                    effective_date=meta.effective_date if meta else "2026-01-01",
+                    expiry_date=meta.expiry_date if meta else None,
+                    wiki_links=wiki_links,
+                )
+            )
+        return pages
+
+    @application.get("/api/v1/actions/pending", response_model=list[GovAction])
+    def list_pending_actions() -> list[GovAction]:
+        return [
+            action
+            for action in registry.actions.values()
+            if action.status == "pending_approval"
+        ]
+
+    @application.get("/api/v1/audit/logs", response_model=list[AuditEvent])
+    def list_audit_logs(limit: int = 100) -> list[AuditEvent]:
+        return pipeline.get_pii_safe_audit_logs(limit=limit)
+
+    @application.post("/api/v1/policy/batch-match", response_model=BatchMatchResponse)
+    def policy_batch_match(payload: BatchMatchRequest) -> BatchMatchResponse:
+        metrics["batch_matches_total"] += 1
+        try:
+            return pipeline.batch_match(
+                profiles=payload.profiles,
+                program_ids=payload.program_ids,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return application
 

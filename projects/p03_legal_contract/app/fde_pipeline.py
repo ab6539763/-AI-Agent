@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -270,3 +271,145 @@ class LegalFDEPipeline:
             },
         )
         return action
+
+    def compare_contract_versions(
+        self,
+        contract_id: str,
+        title: str,
+        original_text: str,
+        revised_text: str,
+        requested_by: str = "legal_ops",
+    ) -> dict[str, Any]:
+        """Compare two contract versions and return clause risk delta + redline recommendations."""
+        orig_masked, orig_pii = self.mask_pii(original_text)
+        rev_masked, rev_pii = self.mask_pii(revised_text)
+
+        def _classify_blocks(prefix: str, text: str) -> list[Clause]:
+            extracted = self.extract_clauses(contract_id, text)
+            items: list[Clause] = []
+            for idx, (cl_title, cl_text) in enumerate(extracted, start=1):
+                ctype, score, level, redline = self.registry.classify_clause_risk(cl_text)
+                items.append(
+                    Clause(
+                        id=f"{contract_id}_{prefix}_cl_{idx}",
+                        contract_id=contract_id,
+                        title=cl_title,
+                        clause_type=ctype,
+                        text=cl_text,
+                        risk_level=level,
+                        risk_score=score,
+                        redline_suggestion=redline,
+                        extracted_cap_usd=self.registry.extract_liability_cap_usd(cl_text),
+                    )
+                )
+            return items
+
+        orig_clauses = _classify_blocks("v1", orig_masked)
+        rev_clauses = _classify_blocks("v2", rev_masked)
+
+        orig_score, orig_level = self._overall_risk(orig_clauses)
+        rev_score, rev_level = self._overall_risk(rev_clauses)
+        risk_score_delta = round(rev_score - orig_score, 4)
+        if risk_score_delta < 0:
+            risk_trend = "improved"
+        elif risk_score_delta > 0:
+            risk_trend = "worsened"
+        else:
+            risk_trend = "unchanged"
+
+        max_len = max(len(orig_clauses), len(rev_clauses))
+        clause_diffs: list[dict[str, Any]] = []
+        redline_recommendations: list[dict[str, Any]] = []
+
+        for idx in range(max_len):
+            orig_cl = orig_clauses[idx] if idx < len(orig_clauses) else None
+            rev_cl = rev_clauses[idx] if idx < len(rev_clauses) else None
+
+            if orig_cl and not rev_cl:
+                status = "removed"
+                delta = round(0.0 - orig_cl.risk_score, 4)
+                diff_lines: list[str] = [f"- {line}" for line in orig_cl.text.splitlines()]
+                rec = "Clause removed in revised version."
+            elif rev_cl and not orig_cl:
+                status = "added"
+                delta = round(rev_cl.risk_score - 0.0, 4)
+                diff_lines = [f"+ {line}" for line in rev_cl.text.splitlines()]
+                rec = rev_cl.redline_suggestion
+            else:
+                assert orig_cl is not None and rev_cl is not None
+                status = "unchanged" if orig_cl.text == rev_cl.text else "modified"
+                delta = round(rev_cl.risk_score - orig_cl.risk_score, 4)
+                diff_lines = list(
+                    difflib.unified_diff(
+                        orig_cl.text.splitlines(),
+                        rev_cl.text.splitlines(),
+                        fromfile="original",
+                        tofile="revised",
+                        lineterm="",
+                    )
+                )
+                rec = rev_cl.redline_suggestion
+                if not rec and delta < 0:
+                    rec = "Risk reduced to low; no further redline required."
+
+            clause_title = rev_cl.title if rev_cl else (orig_cl.title if orig_cl else f"Clause {idx + 1}")
+            clause_type = rev_cl.clause_type if rev_cl else (orig_cl.clause_type if orig_cl else "general")
+
+            clause_diffs.append(
+                {
+                    "index": idx + 1,
+                    "status": status,
+                    "title": clause_title,
+                    "clause_type": clause_type,
+                    "original_text": orig_cl.text if orig_cl else None,
+                    "revised_text": rev_cl.text if rev_cl else None,
+                    "original_risk_level": orig_cl.risk_level if orig_cl else None,
+                    "original_risk_score": orig_cl.risk_score if orig_cl else None,
+                    "revised_risk_level": rev_cl.risk_level if rev_cl else None,
+                    "revised_risk_score": rev_cl.risk_score if rev_cl else None,
+                    "risk_delta": delta,
+                    "redline_recommendation": rec,
+                    "diff_lines": diff_lines,
+                }
+            )
+
+            if rev_cl and rev_cl.redline_suggestion:
+                redline_recommendations.append(
+                    {
+                        "clause_index": idx + 1,
+                        "title": rev_cl.title,
+                        "clause_type": rev_cl.clause_type,
+                        "risk_level": rev_cl.risk_level,
+                        "recommendation": rev_cl.redline_suggestion,
+                    }
+                )
+
+        audit_entry = self.record_audit(
+            event_type="CONTRACT_REDLINE_DIFF",
+            actor=requested_by,
+            target_id=contract_id,
+            details={
+                "original_risk_level": orig_level,
+                "revised_risk_level": rev_level,
+                "risk_score_delta": risk_score_delta,
+                "risk_trend": risk_trend,
+                "pii_masked_count": orig_pii + rev_pii,
+            },
+        )
+
+        return {
+            "contract_id": contract_id,
+            "title": title,
+            "original_risk_score": orig_score,
+            "original_risk_level": orig_level,
+            "revised_risk_score": rev_score,
+            "revised_risk_level": rev_level,
+            "risk_score_delta": risk_score_delta,
+            "risk_trend": risk_trend,
+            "pii_masked_count": orig_pii + rev_pii,
+            "original_clause_count": len(orig_clauses),
+            "revised_clause_count": len(rev_clauses),
+            "clause_diffs": clause_diffs,
+            "redline_recommendations": redline_recommendations,
+            "audit_entry": audit_entry,
+        }

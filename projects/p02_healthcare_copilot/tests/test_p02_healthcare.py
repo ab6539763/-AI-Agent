@@ -331,3 +331,176 @@ def test_fastapi_endpoints_and_request_id_middleware(tmp_path: Path) -> None:
     assert m_data["triage_total"] == 1
     assert m_data["hitl_approvals_total"] == 1
     assert m_data["blocked_interactions_total"] >= 1
+
+
+def test_cors_middleware_headers(tmp_path: Path) -> None:
+    test_app = create_app(
+        wiki_dir=tmp_path / "cors_wiki",
+        audit_log_path=tmp_path / "cors_audit.jsonl",
+    )
+    client = TestClient(test_app)
+
+    preflight = client.options(
+        "/api/v1/dashboard/overview",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers.get("access-control-allow-origin") == "*"
+
+    get_resp = client.get(
+        "/api/v1/dashboard/overview",
+        headers={"Origin": "http://localhost:5173"},
+    )
+    assert get_resp.status_code == 200
+    assert get_resp.headers.get("access-control-allow-origin") == "*"
+
+
+def test_enterprise_dashboard_wiki_pages_pending_hitl_and_audit(tmp_path: Path) -> None:
+    test_app = create_app(
+        wiki_dir=tmp_path / "ent_wiki",
+        audit_log_path=tmp_path / "ent_audit.jsonl",
+    )
+    client = TestClient(test_app)
+
+    # Ingest a clinical wiki page
+    ing = client.post(
+        "/api/v1/wiki/ingest",
+        json={
+            "doc_id": "gl_dm_metformin",
+            "title": "Type 2 Diabetes Metformin First-Line",
+            "content": "Initiate Metformin 500 mg with meals if eGFR >= 30.",
+            "entity_type": "guideline",
+            "condition": "type_2_diabetes",
+            "medication": "metformin",
+            "dose_mg": 500.0,
+            "citation": "ADA Standards of Care 2024",
+        },
+    )
+    assert ing.status_code == 200
+
+    # List wiki pages
+    pages_resp = client.get("/api/v1/wiki/pages")
+    assert pages_resp.status_code == 200
+    pages_data = pages_resp.json()
+    assert pages_data["total"] == 1
+    page = pages_data["pages"][0]
+    assert page["id"] == "gl_dm_metformin"
+    assert page["title"] == "Type 2 Diabetes Metformin First-Line"
+    assert page["path"].endswith("gl_dm_metformin.md")
+    assert "Metformin 500 mg" in page["preview"]
+
+    # Triage a case so a pending HITL action is created
+    triage_resp = client.post(
+        "/api/v1/clinical/triage",
+        json={
+            "patient_case": {
+                "case_id": "case-ent-101",
+                "age": 58,
+                "sex": "F",
+                "chief_complaint": "Patient: Alice Wong elevated fasting glucose, MRN-445566",
+                "symptoms": [
+                    {"symptom_id": "fever", "name": "Fever", "severity": "mild"}
+                ],
+                "active_medications": [],
+                "allergies": [],
+                "conditions": ["type_2_diabetes"],
+                "vital_signs": {"spo2": 98.0, "hr": 76.0},
+            },
+            "proposed_med_ids": ["metformin"],
+            "raw_notes": "Phone 555-333-4444",
+        },
+    )
+    assert triage_resp.status_code == 200
+    action_id = triage_resp.json()["proposed_action"]["action_id"]
+
+    # Dashboard overview reflects counts before sign-off
+    ov_resp = client.get("/api/v1/dashboard/overview")
+    assert ov_resp.status_code == 200
+    ov = ov_resp.json()
+    assert ov["guidelines_count"] >= 2
+    assert ov["medications_count"] >= 8
+    assert ov["wiki_pages_count"] == 1
+    assert ov["pending_hitl_count"] == 1
+    assert ov["audit_logs_count"] == 1
+
+    # Pending actions endpoint lists the action
+    pend_resp = client.get("/api/v1/actions/pending")
+    assert pend_resp.status_code == 200
+    pend = pend_resp.json()
+    assert pend["total"] == 1
+    assert pend["actions"][0]["action_id"] == action_id
+    assert pend["actions"][0]["status"] == "pending_review"
+
+    # Approve action and verify pending queue drains
+    app_resp = client.post(
+        "/api/v1/actions/approve",
+        json={
+            "action_id": action_id,
+            "physician_id": "dr-chen-09",
+            "decision": "approved",
+            "notes": "Confirmed eGFR normal; start Metformin.",
+        },
+    )
+    assert app_resp.status_code == 200
+
+    pend_after = client.get("/api/v1/actions/pending").json()
+    assert pend_after["total"] == 0
+
+    # Audit logs contain both events and no raw PHI
+    audit_resp = client.get("/api/v1/audit/logs")
+    assert audit_resp.status_code == 200
+    audit_data = audit_resp.json()
+    assert audit_data["total"] == 2
+    serialized = json.dumps(audit_data)
+    assert "Alice Wong" not in serialized
+    assert "MRN-445566" not in serialized
+    assert "555-333-4444" not in serialized
+
+
+def test_enterprise_discharge_summary_endpoint(tmp_path: Path) -> None:
+    test_app = create_app(
+        wiki_dir=tmp_path / "dc_wiki",
+        audit_log_path=tmp_path / "dc_audit.jsonl",
+    )
+    client = TestClient(test_app)
+
+    resp = client.post(
+        "/api/v1/clinical/discharge-summary",
+        json={
+            "case_id": "case-dc-501",
+            "diagnosis": "Hypertension and atrial fibrillation",
+            "raw_notes": (
+                "Patient: Robert King, MRN-778899, SSN 123-45-6789, "
+                "DOB 1965-03-21, Phone 555-123-9876, Email r.king@example.com. "
+                "Discharged in stable condition on Warfarin and Lisinopril."
+            ),
+            "conditions": ["hypertension"],
+            "medications": ["warfarin", "lisinopril"],
+            "follow_up_days": 5,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["case_id"] == "case-dc-501"
+    assert "Robert King" not in data["deidentified_note"]
+    assert "123-45-6789" not in data["deidentified_note"]
+    assert "MRN-778899" not in data["deidentified_note"]
+    assert "r.king@example.com" not in data["deidentified_note"]
+    assert set(data["redacted_phi_types"]) >= {"NAME", "MRN", "SSN", "DATE", "PHONE", "EMAIL"}
+
+    step_ids = {item["step_id"] for item in data["follow_up_checklist"]}
+    assert "chk-med-reconciliation" in step_ids
+    assert "chk-followup-visit" in step_ids
+    assert "chk-warfarin-inr" in step_ids
+    assert "chk-bp-renal" in step_ids
+    assert len(data["red_flag_precautions"]) >= 3
+
+    # Audit log recorded DISCHARGE_SUMMARY
+    audit_data = client.get("/api/v1/audit/logs").json()
+    assert audit_data["total"] == 1
+    assert audit_data["logs"][0]["event_type"] == "DISCHARGE_SUMMARY"
+

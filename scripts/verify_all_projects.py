@@ -29,6 +29,14 @@ REQUIRED_FILES = [
     "docs/pmp/03_executing_fde_delivery.md",
     "docs/pmp/04_monitoring_qa_and_eval.md",
     "docs/pmp/05_closing_handover_and_runbook.md",
+    "frontend/package.json",
+    "frontend/vite.config.ts",
+    "frontend/Dockerfile",
+    "frontend/nginx.conf",
+    "frontend/index.html",
+    "frontend/src/main.ts",
+    "frontend/src/api/client.ts",
+    "frontend/src/App.vue",
 ]
 
 

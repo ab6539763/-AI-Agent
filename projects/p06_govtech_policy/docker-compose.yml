@@ -1,25 +1,38 @@
 services:
-  p06-govtech-policy:
+  backend:
     build:
       context: ../..
       dockerfile: projects/p06_govtech_policy/Dockerfile
-    container_name: p06-govtech-policy
+    container_name: p06-govtech-backend
+    command: ["uvicorn", "projects.p06_govtech_policy.app.api:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
-      - "${GOVTECH_PORT:-8006}:8006"
+      - "${GOVTECH_PORT:-8000}:8000"
     environment:
       GOVTECH_HOST: "0.0.0.0"
-      GOVTECH_PORT: "8006"
+      GOVTECH_PORT: "8000"
       GOVTECH_LOG_LEVEL: "${GOVTECH_LOG_LEVEL:-info}"
       GOVTECH_DATA_DIR: "/app/data"
     volumes:
       - govtech_data:/app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8006/health', timeout=3)"]
-      interval: 30s
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: p06-govtech-frontend
+    ports:
+      - "${GOVTECH_FRONTEND_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   govtech_data:

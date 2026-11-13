@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .fde_pipeline import RetailFDEPipeline
@@ -40,6 +42,19 @@ class ApproveActionRequest(BaseModel):
     comment: str = ""
 
 
+class MarginSimItem(BaseModel):
+    sku_id: str
+    promo_discount_pct: float | None = Field(default=None, ge=0.0, le=0.95)
+    proposed_price: float | None = Field(default=None, gt=0)
+    projected_units: int | None = Field(default=None, ge=0)
+
+
+class MarginSimulateRequest(BaseModel):
+    items: list[MarginSimItem] | None = None
+    global_discount_pct: float | None = Field(default=None, ge=0.0, le=0.95)
+    actor: str = "merchandiser-sim"
+
+
 def create_app(data_dir: Path | str | None = None) -> FastAPI:
     resolved_dir = Path(
         data_dir
@@ -55,8 +70,15 @@ def create_app(data_dir: Path | str | None = None) -> FastAPI:
 
     app = FastAPI(
         title="P05 Retail & Supply Chain Growth Agent",
-        version="1.0.0",
+        version="2.0.0",
         description="Ontology + LLM Wiki + FDE Pipeline for Retail Replenishment & Dynamic Pricing",
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     app.state.ontology = ontology
@@ -154,6 +176,106 @@ def create_app(data_dir: Path | str | None = None) -> FastAPI:
         return {
             "items": [c.model_dump() for c in checks],
             "total": len(checks),
+            "skus": [s.model_dump() for s in ontology.skus.values()],
+            "warehouses": [w.model_dump() for w in ontology.warehouses.values()],
+            "suppliers": [s.model_dump() for s in ontology.suppliers.values()],
+            "forecasts": [f.model_dump() for f in ontology.forecasts.values()],
+        }
+
+    @app.get("/api/v1/dashboard/overview")
+    def dashboard_overview() -> dict[str, Any]:
+        checks = ontology.check_all_inventory()
+        stockout_alerts = sum(
+            1 for c in checks if c.risk_level in {"CRITICAL", "WARNING"}
+        )
+        critical_alerts = sum(1 for c in checks if c.risk_level == "CRITICAL")
+        pending_hitl = sum(
+            1
+            for a in ontology.actions.values()
+            if a.status == ActionStatus.PENDING_APPROVAL
+        )
+        executed_actions = sum(
+            1 for a in ontology.actions.values() if a.status == ActionStatus.EXECUTED
+        )
+        blocked_actions = sum(
+            1 for a in ontology.actions.values() if a.status == ActionStatus.BLOCKED
+        )
+        wiki_pages = len(list(wiki.entities_dir.glob("*.md")))
+        total_inventory_value = round(
+            sum(s.current_stock * s.unit_cost for s in ontology.skus.values()), 2
+        )
+        return {
+            "total_skus": len(ontology.skus),
+            "stockout_alerts": stockout_alerts,
+            "critical_alerts": critical_alerts,
+            "warehouses": len(ontology.warehouses),
+            "suppliers": len(ontology.suppliers),
+            "wiki_pages": wiki_pages,
+            "pending_hitl_pos": pending_hitl,
+            "executed_actions": executed_actions,
+            "blocked_actions": blocked_actions,
+            "audit_logs": len(pipeline.audit_trail),
+            "total_inventory_value": total_inventory_value,
+        }
+
+    @app.get("/api/v1/wiki/pages")
+    def wiki_pages() -> dict[str, Any]:
+        pages = []
+        for page_path in sorted(wiki.entities_dir.glob("*.md")):
+            text = page_path.read_text(encoding="utf-8")
+            lines = text.splitlines()
+            first_heading = next(
+                (ln.lstrip("# ").strip() for ln in lines if ln.startswith("# ")),
+                page_path.stem,
+            )
+            title = (
+                first_heading.split(":", 1)[1].strip()
+                if ":" in first_heading
+                else first_heading
+            )
+            type_match = re.search(r"^- Type:\s*(.+)$", text, re.MULTILINE)
+            entity_type = type_match.group(1).strip() if type_match else "Entity"
+            fact_lines = [
+                ln.strip() for ln in lines if ln.strip().startswith("- [")
+            ]
+            preview = (
+                " | ".join(fact_lines[:2])[:220]
+                if fact_lines
+                else " ".join(lines[:4])[:220]
+            )
+            pages.append(
+                {
+                    "id": page_path.stem,
+                    "title": title,
+                    "entity_type": entity_type,
+                    "path": f"entities/{page_path.name}",
+                    "preview": preview,
+                    "content": text,
+                }
+            )
+        return {"items": pages, "total": len(pages)}
+
+    @app.get("/api/v1/wiki/query")
+    def wiki_query(q: str = Query(..., min_length=1), top_k: int = Query(default=5, ge=1, le=20)) -> dict[str, Any]:
+        return wiki.query(question=q, top_k=top_k)
+
+    @app.get("/api/v1/actions/pending")
+    def actions_pending(include_all: bool = Query(default=False)) -> dict[str, Any]:
+        actions = list(ontology.actions.values())
+        if not include_all:
+            actions = [a for a in actions if a.status == ActionStatus.PENDING_APPROVAL]
+        actions.sort(key=lambda a: a.created_at, reverse=True)
+        return {
+            "items": [a.model_dump() for a in actions],
+            "total": len(actions),
+        }
+
+    @app.get("/api/v1/audit/logs")
+    def audit_logs(limit: int = Query(default=100, ge=1, le=500)) -> dict[str, Any]:
+        items = list(reversed(pipeline.audit_trail))[:limit]
+        return {
+            "items": items,
+            "total": len(pipeline.audit_trail),
         }
 
     @app.post("/api/v1/supply/replenish")
@@ -163,6 +285,22 @@ def create_app(data_dir: Path | str | None = None) -> FastAPI:
                 sku_id=payload.sku_id,
                 requested_qty=payload.requested_qty,
                 proposed_price=payload.proposed_price,
+                actor=payload.actor,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/v1/supply/margin-simulate")
+    def supply_margin_simulate(payload: MarginSimulateRequest) -> dict[str, Any]:
+        try:
+            items = (
+                [item.model_dump() for item in payload.items]
+                if payload.items is not None
+                else None
+            )
+            return pipeline.simulate_margin_scenarios(
+                items=items,
+                global_discount_pct=payload.global_discount_pct,
                 actor=payload.actor,
             )
         except KeyError as exc:

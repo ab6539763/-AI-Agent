@@ -106,6 +106,27 @@ class PolicyAskResponse(BaseModel):
     refusal_reason: str | None = None
 
 
+class BatchMatchApplicantResult(BaseModel):
+    applicant_id: str
+    applicant_name: str
+    applicant_type: Literal["citizen", "enterprise"]
+    masked_identifier: str
+    region: str
+    eligible_count: int
+    total_estimated_subsidy: float
+    recommended_department: str
+    evaluations: list[EligibilityEvaluation] = Field(default_factory=list)
+
+
+class BatchMatchResponse(BaseModel):
+    batch_id: str = Field(default_factory=lambda: f"BATCH-{uuid4().hex[:10].upper()}")
+    total_applicants: int
+    total_programs_evaluated: int
+    eligible_applicants: int
+    total_potential_subsidy: float
+    matrix: list[BatchMatchApplicantResult] = Field(default_factory=list)
+
+
 class GovTechFDEPipeline:
     """End-to-end deterministic FDE pipeline for GovTech policy Q&A and benefit sign-off."""
 
@@ -319,5 +340,106 @@ class GovTechFDEPipeline:
         )
         return action
 
+    def batch_match(
+        self,
+        profiles: list[CitizenProfile],
+        program_ids: list[str] | None = None,
+    ) -> BatchMatchResponse:
+        """Evaluate multiple citizen/enterprise profiles across one or more benefit programs."""
+        target_program_ids = (
+            program_ids if program_ids else sorted(self.registry.programs.keys())
+        )
+        for pid in target_program_ids:
+            if pid not in self.registry.programs:
+                raise KeyError(f"Unknown program_id: {pid}")
+
+        matrix: list[BatchMatchApplicantResult] = []
+        eligible_applicants = 0
+        total_potential_subsidy = 0.0
+
+        for profile in profiles:
+            self.registry.register_profile(profile)
+            masked_id = mask_identifier(profile.identifier)
+            evals: list[EligibilityEvaluation] = []
+            for pid in target_program_ids:
+                evals.extend(self.registry.evaluate_eligibility(profile, program_id=pid))
+
+            eligible_evals = [ev for ev in evals if ev.eligible]
+            applicant_subsidy = sum(ev.estimated_subsidy for ev in eligible_evals)
+            if eligible_evals:
+                eligible_applicants += 1
+                total_potential_subsidy += applicant_subsidy
+
+            recommended_dept = (
+                eligible_evals[0].department
+                if eligible_evals
+                else self.registry.route_department(profile.industry or "政务")
+            )
+
+            self._record_audit(
+                stage="batch_match",
+                actor=profile.applicant_id,
+                masked_pii_types=["applicant_identifier"],
+                summary=(
+                    f"Batch-matched {profile.applicant_id} ({masked_id}): "
+                    f"{len(eligible_evals)}/{len(evals)} programs eligible, "
+                    f"estimated subsidy {applicant_subsidy:.0f} CNY"
+                ),
+                metadata={
+                    "applicant_type": profile.applicant_type,
+                    "eligible_count": len(eligible_evals),
+                    "estimated_subsidy": applicant_subsidy,
+                },
+            )
+
+            matrix.append(
+                BatchMatchApplicantResult(
+                    applicant_id=profile.applicant_id,
+                    applicant_name=profile.name,
+                    applicant_type=profile.applicant_type,
+                    masked_identifier=masked_id,
+                    region=profile.region,
+                    eligible_count=len(eligible_evals),
+                    total_estimated_subsidy=applicant_subsidy,
+                    recommended_department=recommended_dept,
+                    evaluations=evals,
+                )
+            )
+
+        return BatchMatchResponse(
+            total_applicants=len(profiles),
+            total_programs_evaluated=len(target_program_ids),
+            eligible_applicants=eligible_applicants,
+            total_potential_subsidy=total_potential_subsidy,
+            matrix=matrix,
+        )
+
     def get_audit_trail(self) -> list[AuditEvent]:
         return list(self.audit_trail)
+
+    def get_pii_safe_audit_logs(self, limit: int = 100) -> list[AuditEvent]:
+        """Return PII-sanitized audit log entries (most recent first)."""
+        safe_events: list[AuditEvent] = []
+        for ev in reversed(self.audit_trail[-limit:]):
+            masked_summary, extra_types = mask_pii(ev.summary)
+            safe_meta: dict[str, Any] = {}
+            for k, v in ev.metadata.items():
+                if isinstance(v, str):
+                    masked_v, v_types = mask_pii(v)
+                    safe_meta[k] = masked_v
+                    extra_types.extend(v_types)
+                else:
+                    safe_meta[k] = v
+            combined_types = list(dict.fromkeys([*ev.masked_pii_types, *extra_types]))
+            safe_events.append(
+                AuditEvent(
+                    event_id=ev.event_id,
+                    timestamp=ev.timestamp,
+                    stage=ev.stage,
+                    actor=ev.actor,
+                    masked_pii_types=combined_types,
+                    summary=masked_summary,
+                    metadata=safe_meta,
+                )
+            )
+        return safe_events

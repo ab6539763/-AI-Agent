@@ -8,10 +8,11 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.fde_pipeline import ManufacturingFDEPipeline
-from app.llm_wiki import ManufacturingLLMWiki
+from app.llm_wiki import WIKI_LINK_RE, ManufacturingLLMWiki
 from app.ontology import ActionStatus, ManufacturingOntologyRegistry
 
 
@@ -44,6 +45,16 @@ class ApproveActionRequest(BaseModel):
     reason: str = ""
 
 
+class TelemetrySample(BaseModel):
+    equipment_id: str
+    readings: dict[str, float] = Field(default_factory=dict)
+    operating_hours: float = 0.0
+
+
+class PredictiveMaintenanceRequest(BaseModel):
+    samples: list[TelemetrySample] = Field(default_factory=list)
+
+
 def create_app(
     wiki_dir: str | Path | None = None,
     registry: ManufacturingOntologyRegistry | None = None,
@@ -74,8 +85,14 @@ def create_app(
 
     app = FastAPI(
         title="P04 Smart Manufacturing & Equipment Ops Agent",
-        version="1.0.0",
+        version="1.1.0",
         description="Offline deterministic Manufacturing Ontology + LLM Wiki + HITL FDE Pipeline.",
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.state.registry = ont_registry
     app.state.wiki = wiki
@@ -197,6 +214,81 @@ def create_app(
             "equipment_status": eq.status.value if eq else None,
             "audit_trail_count": len(pipeline.audit_trail),
         }
+
+    @app.get("/api/v1/dashboard/overview")
+    def dashboard_overview() -> dict[str, Any]:
+        wiki_pages_count = len(list(wiki.entities_dir.glob("*.md")))
+        pending_actions = pipeline.get_pending_actions()
+        status_breakdown: dict[str, int] = {}
+        for eq in ont_registry.equipment.values():
+            key = eq.status.value
+            status_breakdown[key] = status_breakdown.get(key, 0) + 1
+
+        return {
+            "service": "p04-manufacturing-ops",
+            "equipment_count": len(ont_registry.equipment),
+            "fault_codes_count": len(ont_registry.fault_codes),
+            "sops_count": len(ont_registry.sops),
+            "wiki_pages_count": wiki_pages_count,
+            "pending_hitl_shutdowns": len(pending_actions),
+            "audit_logs_count": len(pipeline.audit_trail),
+            "equipment_status_breakdown": status_breakdown,
+            "equipment": [eq.model_dump() for eq in ont_registry.equipment.values()],
+            "fault_codes": [fc.model_dump() for fc in ont_registry.fault_codes.values()],
+            "sops": [sop.model_dump() for sop in ont_registry.sops.values()],
+            "links": [lnk.model_dump() for lnk in ont_registry.links],
+        }
+
+    @app.get("/api/v1/wiki/pages")
+    def wiki_pages() -> dict[str, Any]:
+        pages: list[dict[str, Any]] = []
+        for md_file in sorted(wiki.entities_dir.glob("*.md")):
+            text = md_file.read_text(encoding="utf-8")
+            meta, body = wiki._parse_frontmatter(text)
+            entity_id = str(meta.get("entity_id", md_file.stem))
+            title = str(meta.get("title", entity_id))
+            entity_type = str(meta.get("entity_type", "Unknown"))
+            updated_at = str(meta.get("updated_at", ""))
+            clean_lines = [
+                ln.strip()
+                for ln in body.splitlines()
+                if ln.strip() and not ln.strip().startswith("#")
+            ]
+            preview = " ".join(clean_lines)[:260]
+            wiki_links = sorted(set(WIKI_LINK_RE.findall(body)))
+            pages.append(
+                {
+                    "id": entity_id,
+                    "title": title,
+                    "entity_type": entity_type,
+                    "path": str(md_file),
+                    "preview": preview,
+                    "updated_at": updated_at,
+                    "wiki_links": wiki_links,
+                    "content": body.strip(),
+                }
+            )
+        return {"pages": pages, "total": len(pages)}
+
+    @app.get("/api/v1/actions/pending")
+    def actions_pending() -> dict[str, Any]:
+        pending = [a.model_dump() for a in pipeline.get_pending_actions()]
+        return {"actions": pending, "total": len(pending)}
+
+    @app.get("/api/v1/audit/logs")
+    def audit_logs() -> dict[str, Any]:
+        logs = pipeline.get_audit_trail()
+        return {"logs": logs, "total": len(logs)}
+
+    @app.post("/api/v1/ops/predictive-maintenance")
+    def ops_predictive_maintenance(
+        payload: PredictiveMaintenanceRequest | None = None,
+    ) -> dict[str, Any]:
+        samples = [s.model_dump() for s in payload.samples] if payload else []
+        try:
+            return pipeline.generate_predictive_maintenance(samples=samples)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return app
 
