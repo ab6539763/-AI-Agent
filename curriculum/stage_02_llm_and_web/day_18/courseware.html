@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 18 | 智枢企业级智能体平台 · 高级 Prompt 工程</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第二阶段：大模型与 Web 服务开发 · Day 18 | 版本 v0.2.0-day18</div>
+      <h1>高级 Prompt 工程：CoT 思维链、防注入与结构化意图分类</h1>
+      <p>企业需求驱动：构建集 PromptGuard 安全守卫、CoTPromptBuilder 思维链与 Pydantic v2 强类型校验于一体的客服意图分类网关</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（Day 18 实战背景）：</strong><br />
+      在企业级智能体上线前，我们必须解决三个核心痛点：<strong>1）复杂意图误判</strong>（用 CoT“让我们一步步思考”提升推理质量）；<strong>2）恶意 Prompt 注入与系统提示词套取</strong>（用 <code>PromptGuard</code> 前置拦截）；<strong>3）大模型输出格式飘忽</strong>（用 <code>Pydantic v2</code> 强类型约束 JSON）。今天我们将把这三道防线组装成 <code>CustomerIntentClassifier</code>！
+    </div>
+
+    <h2>一、三大核心工程防线</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>防线模块</th>
+            <th>核心技术</th>
+            <th>解决的企业痛点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>PromptGuard</code></td>
+            <td>中英文正则规则库 + 零宽字符/标签清洗</td>
+            <td>在调用 LLM 前短路拦截“忽略之前指令”、“系统提示词泄露”等攻击</td>
+          </tr>
+          <tr>
+            <td><code>CoTPromptBuilder</code></td>
+            <td>“让我们一步步思考” + <code>&lt;user_query&gt;</code> XML 隔离</td>
+            <td>引导模型先推理后分类，并防止不可信输入越权覆盖 System 指令</td>
+          </tr>
+          <tr>
+            <td><code>IntentResult</code> (Pydantic v2)</td>
+            <td><code>Literal</code> 枚举 + <code>Field(ge=0.0, le=1.0)</code> + 围栏剥离</td>
+            <td>保证下游客服工单系统拿到的永远是字段完整、类型安全的 JSON</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>二、意图分类与安全防御流水线</h2>
+    <div class="card">
+      <p>所有客户输入首先经过 <code>PromptGuard.inspect()</code> 检测；命中攻击规则时直接返回 <code>intent="security_blocked"</code>，零 Token 消耗；安全文本则进入 CoT 构造与 <code>httpx</code> 推理通道。</p>
+      <div class="mermaid">
+        flowchart LR
+          User["客户输入"] --> Guard{"PromptGuard.inspect()"}
+          Guard -- "命中注入规则" --> Block["返回 security_blocked<br/>(零 LLM 调用)"]
+          Guard -- "安全通过" --> CoT["CoTPromptBuilder<br/>让我们一步步思考 + &lt;user_query&gt;"]
+          CoT --> LLM["httpx.Client<br/>(Live API / MockTransport)"]
+          LLM --> Fence["剥离 Markdown ```json 围栏"]
+          Fence --> Valid["IntentResult.model_validate_json()"]
+      </div>
+    </div>
+
+    <h2>三、核心代码片段速览</h2>
+    <div class="card">
+      <h3>1. Pydantic v2 强类型契约</h3>
+      <pre><code>class IntentResult(BaseModel):
+    intent: IntentCategory
+    confidence: float = Field(ge=0.0, le=1.0, description="置信度，范围 0.0 ~ 1.0")
+    reasoning: str = Field(min_length=1, description="CoT 逐步推理过程")
+    entities: dict[str, Any] = Field(default_factory=dict, description="提取的关键业务实体")</code></pre>
+
+      <h3>2. 前置短路拦截（Short-Circuit）</h3>
+      <pre><code>guard_result = self.guard.inspect(user_input)
+if not guard_result.is_safe:
+    return IntentResult(
+        intent="security_blocked",
+        confidence=1.0,
+        reasoning=f"前置安全守卫拦截：{guard_result.reason}",
+        entities={"risk_level": guard_result.risk_level, "matched_rules": guard_result.matched_rules},
+    )</code></pre>
+    </div>
+
+    <h2>四、本地启动与验收命令</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 18 离线演示（MockTransport）
+.venv/bin/python project_iterations/day_18/main.py
+
+# 2. 一键运行 Day 18 Notebook 实操与 pytest 全量单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_02_llm_and_web/day_18/notebook.ipynb \
+  --iter project_iterations/day_18</code></pre>
+      <details>
+        <summary>点击查看：为什么 MockTransport 在单元测试中至关重要？</summary>
+        <p>通过 <code>httpx.MockTransport</code>，我们可以在完全离线、无 API Key 的 CI 环境中真实走通 <code>httpx.Client.post()</code> 请求序列化、Header 构造、JSON 解析与 Pydantic 校验全链路，同时还能用 <code>spy_handler</code> 精确断言 Prompt 注入被拦截时没有发出任何网络请求。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
