@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 48 | 智枢企业级智能体平台 · 多 Agent 智能办公助手（Part 1）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：智能体开发与多智能体编排 · Day 48 | 版本 v0.4.0-day48</div>
+      <h1>里程碑项目 3（Part 1）：多 Agent 智能办公助手核心编排与工具集</h1>
+      <p>企业需求驱动（Issue #048）：构建 ResearchAgent / CalendarAgent / MailAgent 协同架构、6 大办公工具与 SQLite 断点审批恢复</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（为什么需要多 Agent 分工 + 高危操作中断审批？）：</strong><br />
+      在企业办公自动化中，调研、日程协调与邮件沟通是三个职责截然不同的领域。将所有工具塞进一个单体 Agent 会导致提示词臃肿与越权风险；而直接自动发邮件或约会议更可能造成“不可逆的职场事故”。今天我们用 <strong>OfficeSupervisor</strong> 统筹三大专职 Agent，并通过 <strong>SQLiteCheckpointer + interrupt_before</strong> 为高危动作加上“人类最后一道确认防线”。
+    </div>
+
+    <h2>一、多 Agent 协同与 HITL 断点恢复架构</h2>
+    <div class="card">
+      <p>每一次办公协同请求均经历“主管拆解计划 → 专职 Agent 依次执行 → 高危工具触发 <code>interrupt_before</code> 落盘 SQLite → 人工审批（批准/微调/拒绝）→ 断点续跑”完整闭环：</p>
+      <div class="mermaid">
+        flowchart TD
+          REQ(["用户办公请求"]) --> SUP["OfficeSupervisor.plan_tasks() 拆解任务"]
+          SUP --> RES["ResearchAgent: search_company_docs + web_search"]
+          RES --> CAL["CalendarAgent: list_calendar 日程冲突检查"]
+          CAL --> CHK1{"create_meeting 需人工审批?"}
+          CHK1 -->|"挂起写入 SQLite"| WAIT1(["interrupted: create_meeting"])
+          WAIT1 -->|"resume(approved=True)"| MTG["执行 create_meeting"]
+          WAIT1 -->|"resume(approved=False)"| REJ(["status=rejected"])
+          MTG --> MAIL["MailAgent: draft_email 汇总前序产出"]
+          MAIL --> CHK2{"send_email 需人工审批?"}
+          CHK2 -->|"挂起写入 SQLite"| WAIT2(["interrupted: send_email"])
+          WAIT2 -->|"resume(approved=True)"| SEND["执行 send_email"]
+          WAIT2 -->|"resume(approved=False)"| REJ
+          SEND --> DONE(["status=completed · 返回汇总报告"])
+      </div>
+    </div>
+
+    <h2>二、三大专职 Agent 与 6 大办公工具矩阵</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>Agent 角色</th>
+            <th>核心职责</th>
+            <th>授权工具（最小权限）</th>
+            <th>风险等级</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ResearchAgent</code></td>
+            <td>企业内部文档与外部行业资料检索</td>
+            <td><code>search_company_docs</code>, <code>web_search</code></td>
+            <td>低危只读</td>
+          </tr>
+          <tr>
+            <td><code>CalendarAgent</code></td>
+            <td>查询日程冲突、创建企业正式会议</td>
+            <td><code>list_calendar</code>, <code>create_meeting</code></td>
+            <td><code>create_meeting</code> 高危（默认中断）</td>
+          </tr>
+          <tr>
+            <td><code>MailAgent</code></td>
+            <td>汇总前序产出起草邮件并正式发送</td>
+            <td><code>draft_email</code>, <code>send_email</code></td>
+            <td><code>send_email</code> 高危（默认中断）</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、SQLite 断点持久化与审批恢复实战</h2>
+    <div class="card">
+      <pre><code>from zhishu_agent import OfficeSupervisor, OfficeWorkspace, SQLiteCheckpointer
+
+ws = OfficeWorkspace()
+sup = OfficeSupervisor(
+    workspace=ws,
+    checkpointer=SQLiteCheckpointer("office_checkpoints.db"),
+    interrupt_before={"create_meeting", "send_email"},
+)
+
+# 1. 启动协同任务 -> 在 create_meeting 前自动挂起
+res1 = sup.run("请调研 Q4 战略文档，预约会议并发送邮件通知", thread_id="demo-01")
+print(res1["status"], res1["pending_action"]["tool_name"])  # interrupted create_meeting
+
+# 2. 人工批准并微调会议时间 -> 推进至 send_email 前再次挂起
+res2 = sup.resume("demo-01", approved=True, modified_args={"start_time": "16:30"})
+print(res2["status"], res2["pending_action"]["tool_name"])  # interrupted send_email
+
+# 3. 人工批准发送邮件 -> 全部完成
+res3 = sup.resume("demo-01", approved=True)
+print(res3["status"])  # completed</code></pre>
+    </div>
+
+    <h2>四、课后思考与自测</h2>
+    <div class="card">
+      <p><strong>思考题：</strong>为什么我们在 <code>OfficeSupervisor.resume()</code> 中支持传入 <code>modified_args</code> 参数？如果只允许“全部通过”或“全部拒绝”，在实际企业办公场景中会遇到什么痛点？</p>
+      <details>
+        <summary>点击查看参考解答</summary>
+        <p>在真实办公中，审批人往往认同 Agent 的主体意图（如“确实需要约一个评审会”或“确实要发这封同步邮件”），但经常需要微调具体细节（例如把会议时间从 16:00 改到 16:30，或补充一个抄送人）。如果不支持 <code>modified_args</code>，用户只能拒绝后重新从头跑一遍调研与规划，不仅浪费 Token 和时间，还破坏了协同体验。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default' });</script>
+</body>
+</html>
