@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 06 | 智枢企业级智能体平台 · 函数进阶与函数式管道</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 1 周 · Day 06 | 版本 v0.1.0-day06</div>
+      <h1>函数进阶与函数式管道：重构智枢平台请求与清洗引擎</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》首次工程重构 —— 掌握 *args / **kwargs、高阶函数与 lambda、递归遍历嵌套 JSON</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      各位同学好，前 5 天我们写出了环境自检、Prompt 拼接和 JSON 解析，但早期脚本里很多逻辑都是“硬编码”平铺的。在真实企业级 AI 研发中，不同大模型厂商（OpenAI、DeepSeek、Qwen）的扩展参数各不相同，Prompt 清洗规则也经常增减。今天我们用 <strong>Python 函数进阶体系（位置/关键字/默认参数、<code>*args</code>/<code>**kwargs</code>、高阶函数与 <code>lambda</code>、递归）</strong>，将零散脚本重构为可插拔的 <code>zhishu_agent/pipeline_fn.py</code>！
+    </div>
+
+    <h2>一、上午：Python 函数参数绑定机制与函数式编程核心</h2>
+    <div class="card">
+      <p>设计通用 SDK 函数（如大模型 API 请求构造器）时，参数的声明顺序决定了调用的灵活性与安全性：</p>
+      <div class="mermaid">
+        flowchart LR
+          P1["1. 位置参数<br/>model: str"] --> P2["2. 可变位置参数<br/>*messages: dict"]
+          P2 --> P3["3. 仅限关键字默认参数<br/>temperature: float = 0.7"]
+          P3 --> P4["4. 可变关键字参数<br/>**extra_params"]
+      </div>
+    </div>
+
+    <h2>二、上午实操：<code>lambda</code> 匿名函数与模型价格排序</h2>
+    <div class="card">
+      <p>在智枢平台的模型路由网关中，我们经常使用 <code>sorted()</code> 配合 <code>lambda</code> 按成本动态排序：</p>
+      <pre><code>models = [
+    {"name": "deepseek-chat", "input_price": 1.0, "output_price": 2.0},
+    {"name": "qwen-max", "input_price": 20.0, "output_price": 60.0},
+    {"name": "glm-4-flash", "input_price": 0.1, "output_price": 0.1},
+    {"name": "gpt-4o-mini", "input_price": 1.1, "output_price": 4.4},
+]
+
+# 按输出单价升序排序
+sorted_models = sorted(models, key=lambda m: m["output_price"])
+print([m["name"] for m in sorted_models])
+# ['glm-4-flash', 'deepseek-chat', 'gpt-4o-mini', 'qwen-max']</code></pre>
+    </div>
+
+    <h2>三、下午：企业需求 PRD 与系统架构设计</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #006（Tech Lead 张工 / PM 林晓 提出）：</strong>将早期脚本重构为函数式管道：1）<code>build_api_payload</code> 支持动态消息与扩展参数透传；2）<code>apply_pipeline</code> 支持注入任意个 <code>lambda</code> 清洗步骤；3）<code>count_nested_tokens</code> 递归统计嵌套 JSON 对话树的文本字符数。</p>
+      <div class="mermaid">
+        flowchart TD
+          Raw["原始 Prompt 文本"] --> Pipe["高阶函数管道<br/>apply_pipeline(text, *transforms)"]
+          T["str.strip / lambda 变换链"] -.-> Pipe
+          Pipe -->|干净 Prompt| Builder["API 请求体构造器<br/>build_api_payload(model, *messages, temperature=0.7, **extra_params)"]
+          Builder --> Payload["标准 API Payload 字典"]
+          Payload -->|递归遍历 dict / list / str| Counter["嵌套 Token 统计器<br/>count_nested_tokens(node)"]
+          Counter --> Out["估算 Token 总数 (int)"]
+      </div>
+    </div>
+
+    <h2>四、下午实操：核心代码逐行解析（可直接粘贴运行）</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_06/zhishu_agent/pipeline_fn.py</code>：</p>
+      <pre><code>from collections.abc import Callable
+from typing import Any
+
+
+def build_api_payload(
+    model: str,
+    *messages: dict[str, Any],
+    temperature: float = 0.7,
+    **extra_params: Any,
+) -&gt; dict[str, Any]:
+    """动态构造 OpenAI / DeepSeek Chat Completions API 请求体字典。"""
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model 必须是非空字符串")
+    if not (0.0 &lt;= temperature &lt;= 2.0):
+        raise ValueError(f"temperature 必须在 [0.0, 2.0] 范围内，当前为: {temperature}")
+    for idx, msg in enumerate(messages):
+        if not isinstance(msg, dict):
+            raise TypeError(f"messages 第 {idx} 项必须是 dict 类型")
+
+    payload: dict[str, Any] = {
+        "model": model.strip(),
+        "messages": list(messages),
+        "temperature": temperature,
+    }
+    payload.update(extra_params)
+    return payload
+
+
+def apply_pipeline(text: str, *transforms: Callable[[str], str]) -&gt; str:
+    """高阶函数：按顺序将任意多个文本变换函数串联应用到输入文本上。"""
+    if not isinstance(text, str):
+        raise TypeError("text 必须是 str 类型")
+    result = text
+    for idx, fn in enumerate(transforms):
+        if not callable(fn):
+            raise TypeError(f"transforms 第 {idx} 项不可调用: {fn!r}")
+        result = fn(result)
+    return result
+
+
+def count_nested_tokens(node: Any) -&gt; int:
+    """递归遍历嵌套 JSON / 消息树，统计所有文本节点的字符数（估算 Token）。"""
+    if isinstance(node, str):
+        return len(node)
+    if isinstance(node, list):
+        return sum(count_nested_tokens(item) for item in node)
+    if isinstance(node, dict):
+        return sum(count_nested_tokens(value) for value in node.values())
+    return 0
+
+
+if __name__ == "__main__":
+    cleaned = apply_pipeline(
+        "  请总结  【机密】Q3财报  ",
+        str.strip,
+        lambda s: " ".join(s.split()),
+        lambda s: s.replace("【机密】", "[已脱敏]"),
+    )
+    payload = build_api_payload(
+        "deepseek-chat",
+        {"role": "user", "content": cleaned},
+        temperature=0.3,
+        max_tokens=2048,
+        stream=True,
+    )
+    print("清洗结果:", cleaned)
+    print("嵌套 Token 估算:", count_nested_tokens(payload))</code></pre>
+    </div>
+
+    <h2>五、课堂笔记：今日核心知识速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>知识点</th><th>Python 语法</th><th>在大模型/Agent 中的真实用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>可变位置参数 <code>*args</code></td><td><code>def f(*messages):</code></td><td>收集任意条数的历史对话消息，打包为元组</td></tr>
+          <tr><td>可变关键字参数 <code>**kwargs</code></td><td><code>def f(**extra_params):</code></td><td>透传 <code>max_tokens</code>、<code>stream</code>、<code>top_p</code> 等扩展配置</td></tr>
+          <tr><td>高阶函数</td><td>函数作为参数传递</td><td>构建可插拔的 Prompt 清洗、脱敏、格式化管道</td></tr>
+          <tr><td>匿名函数 <code>lambda</code></td><td><code>lambda x: x["price"]</code></td><td>配合 <code>sorted()</code> 按模型价格排序，或编写轻量文本转换</td></tr>
+          <tr><td>递归函数</td><td>函数调用自身 + Base Case</td><td>遍历任意深度的嵌套 JSON、Tool Calling 与多级 Agent 树</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>六、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1：</strong>编写 <code>build_tool_log(tool_name, *tags, level="INFO", **metadata)</code>，演示位置参数、<code>*args</code>、默认参数与 <code>**kwargs</code> 的组合使用。</p>
+      <p><strong>作业 2：</strong>使用 <code>sorted()</code> 配合 <code>lambda</code> 对大模型列表分别按 <code>output_price</code> 升序与综合加权单价降序排列。</p>
+      <p><strong>作业 3：</strong>编写递归函数 <code>find_values_by_key(node, target_key)</code>，从任意深度的嵌套字典/列表中收集指定键名的所有值。</p>
+      <details>
+        <summary>点击展开完整参考答案</summary>
+        <pre><code># 作业 1 参考答案
+def build_tool_log(tool_name: str, *tags: str, level: str = "INFO", **metadata) -&gt; dict:
+    return {
+        "tool_name": tool_name,
+        "level": level,
+        "tags": list(tags),
+        "meta": metadata,
+    }
+
+print(build_tool_log("query_kb", "rag", "enterprise", level="DEBUG", latency_ms=85))
+
+# 作业 2 参考答案
+models = [
+    {"name": "deepseek-chat", "input_price": 1.0, "output_price": 2.0},
+    {"name": "qwen-max", "input_price": 20.0, "output_price": 60.0},
+    {"name": "glm-4-flash", "input_price": 0.1, "output_price": 0.1},
+    {"name": "gpt-4o-mini", "input_price": 1.1, "output_price": 4.4},
+]
+by_output_asc = sorted(models, key=lambda m: m["output_price"])
+by_weighted_desc = sorted(
+    models,
+    key=lambda m: 0.4 * m["input_price"] + 0.6 * m["output_price"],
+    reverse=True,
+)
+print("输出单价升序:", [m["name"] for m in by_output_asc])
+print("加权单价降序:", [m["name"] for m in by_weighted_desc])
+
+# 作业 3 参考答案
+def find_values_by_key(node, target_key: str) -&gt; list:
+    results = []
+    if isinstance(node, dict):
+        for key, value in node.items():
+            if key == target_key:
+                results.append(value)
+            results.extend(find_values_by_key(value, target_key))
+    elif isinstance(node, list):
+        for item in node:
+            results.extend(find_values_by_key(item, target_key))
+    return results
+
+agent_tree = {
+    "name": "主路由Agent",
+    "sub_agents": [
+        {"name": "财务分析Agent", "tools": [{"name": "sql_query"}]},
+        {"name": "法务审阅Agent", "config": {"name": "contract_checker"}},
+    ],
+}
+print(find_values_by_key(agent_tree, "name"))</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
