@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 52 | 智枢企业级智能体平台 · 指令数据集构建（Alpaca / ShareGPT、清洗去重与 Self-Instruct）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第五阶段：大模型微调与私有化部署 · Day 52 | 版本 v0.5.0-day52</div>
+      <h1>指令微调数据集构建：Alpaca / ShareGPT、清洗去重与 Self-Instruct</h1>
+      <p>企业需求驱动（Issue #052）：构建高质量、零冗余的垂直领域智能客服 SFT 指令数据集流水线</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（数据决定微调上限）：</strong><br />
+      欢迎来到 Stage 5 的核心数据工程日——<strong>Day 52</strong>！微调大模型的成败 80% 取决于数据质量。今天我们基于 Pydantic v2 实现 <code>AlpacaSample</code> 与 <code>ShareGPTSample</code> 双格式 Schema 及双向无损转换器，打造<strong>空白规范化 + 最小长度过滤 + SHA-256 精确去重 + 字符 N-gram Jaccard 近似去重</strong>的工业级清洗流水线，并通过 Self-Instruct 合成 500 条企业客服样本，导出为可直接喂给 LLaMA-Factory 的 JSONL 文件。
+    </div>
+
+    <h2>一、指令数据集构建流水线架构</h2>
+    <div class="card">
+      <p>流水线将原始工单与种子指令依次经过清洗、两级去重、Self-Instruct 扩增与双格式转换，最终落盘为标准 UTF-8 JSONL。</p>
+      <div class="mermaid">
+        flowchart LR
+          RAW["Raw Logs & Seed Tasks"] --> CLEAN["Clean: 空白规范化 + 长度过滤"]
+          CLEAN --> DEDUP["Deduplicate: SHA-256 + N-gram Jaccard"]
+          DEDUP --> SELF["Self-Instruct: 500 条垂直客服合成"]
+          SELF --> CONV["Schema Converter: Alpaca <-> ShareGPT"]
+          CONV --> JSONL["Alpaca / ShareGPT JSONL"]
+      </div>
+    </div>
+
+    <h2>二、Alpaca vs ShareGPT 数据格式对比</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>维度</th>
+            <th>Alpaca 格式（<code>AlpacaSample</code>）</th>
+            <th>ShareGPT 格式（<code>ShareGPTSample</code>）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>核心字段</strong></td>
+            <td><code>instruction</code>, <code>input</code>, <code>output</code></td>
+            <td><code>conversations: [{"from": "human"|"gpt", "value": "..."}]</code></td>
+          </tr>
+          <tr>
+            <td><strong>适用场景</strong></td>
+            <td>单轮指令遵循、结构化任务抽取</td>
+            <td>多轮对话微调、角色扮演、Agent 轨迹训练</td>
+          </tr>
+          <tr>
+            <td><strong>系统提示词</strong></td>
+            <td>可选 <code>system</code> 字段</td>
+            <td>顶层 <code>system</code> 或首条 <code>from: "system"</code> 消息</td>
+          </tr>
+          <tr>
+            <td><strong>双向转换</strong></td>
+            <td colspan="2">通过 <code>alpaca_to_sharegpt()</code> 与 <code>sharegpt_to_alpaca()</code> 实现单轮样本 100% 无损互转</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：合成 500 条数据、清洗去重与双格式导出</h2>
+    <div class="card">
+      <pre><code>from zhishu_agent import (
+    alpaca_to_sharegpt,
+    clean_and_deduplicate_with_stats,
+    compute_dataset_stats,
+    export_jsonl,
+    generate_customer_service_dataset,
+)
+
+raw_samples = generate_customer_service_dataset(count=500, seed=42)
+cleaned, dedup_stats = clean_and_deduplicate_with_stats(raw_samples)
+ds_stats = compute_dataset_stats(cleaned)
+
+print("清洗去重:", dedup_stats.model_dump())
+print("数据集统计:", ds_stats.model_dump())
+
+sharegpt_samples = [alpaca_to_sharegpt(s) for s in cleaned]
+export_jsonl(cleaned, "output/cs_alpaca_500.jsonl")
+export_jsonl(sharegpt_samples, "output/cs_sharegpt_500.jsonl")</code></pre>
+    </div>
+
+    <h2>四、高频工程问题 Q&amp;A</h2>
+    <div class="card">
+      <details>
+        <summary>Q1：为什么中文指令去重选择“字符级 3-gram Jaccard”而不是空格分词？</summary>
+        <p>中文自然语言没有天然空格分隔符，按空格切分会导致整句被当作单个 Token 而丧失局部相似度感知；字符级 3-gram 无需依赖外部分词器即可精准捕捉局部语序重合，配合倒排索引可在毫秒级完成数百条样本的近似去重。</p>
+      </details>
+      <details>
+        <summary>Q2：<code>ShareGPTMessage</code> 如何解决 Python 关键字 <code>from</code> 的命名冲突？</summary>
+        <p>在 Pydantic v2 中将模型字段命名为 <code>from_</code> 并配置 <code>Field(..., alias="from")</code> 与 <code>ConfigDict(populate_by_name=True)</code>，序列化时使用 <code>model_dump_json(by_alias=True)</code> 即可输出标准的 <code>"from": "human"</code>。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
