@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 54 | 智枢企业级智能体平台 · 微调效果评测、LoRA 权重合并与模型量化</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第五阶段：模型微调与私有化部署 · Day 54 | 版本 v0.5.0-day54</div>
+      <h1>微调效果评测、LoRA 权重合并与模型量化（GPTQ / AWQ / GGUF）</h1>
+      <p>企业需求驱动（Issue #054）：打通“SFT/QLoRA 训练产出 → 零开销权重合并 → 4-bit/8-bit 量化压缩 → 私有化部署”</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“能训练”走向“可上线”）：</strong><br />
+      训练结束时 Loss 下降只是第一步！直接带着 LoRA Adapter 上线会增加推理旁路延迟，而 14B/32B FP16 权重又会吃光显卡显存。今天在 <strong>Day 54</strong>，我们通过纯 Python 实现 <code>merge_lora_weights</code> 掌握权重合并的数学本质，用 <code>evaluate_before_after</code> 建立准确率与格式合规率双门禁，并利用 <code>estimate_quantized_size_gb</code> 精准规划 GPTQ、AWQ 与 GGUF 量化部署方案。
+    </div>
+
+    <h2>一、LoRA 合并与量化部署流水线</h2>
+    <div class="card">
+      <p>生产环境标准路径是<strong>先合并（Merge）再量化（Quantize）</strong>：先将低秩适配器融合进基座权重消除推理分支，再针对目标硬件执行 4-bit/8-bit 校准量化。</p>
+      <div class="mermaid">
+        flowchart LR
+          BASE["Base Model (FP16 权重 W)"] --> MERGE["LoRA Merge: W' = W + (alpha/r) * B @ A"]
+          LORA["LoRA Adapter (矩阵 A, B)"] --> MERGE
+          MERGE --> EVAL{"微调前后评测: Accuracy & 格式合规率"}
+          EVAL -->|"不达标"| TUNE["回溯清洗数据 / 调整 rank 与学习率"]
+          EVAL -->|"通过门禁"| QUANT["模型量化压缩 (Quantization)"]
+          QUANT -->|"GPU 高吞吐 (vLLM)"| GPU["GPTQ-4bit / AWQ-4bit (~4.25 bpw)"]
+          QUANT -->|"CPU / Mac (llama.cpp)"| CPU["GGUF-Q4_K_M / Q8_0"]
+          GPU --> DEPLOY["智枢智能体私有化部署"]
+          CPU --> DEPLOY
+      </div>
+    </div>
+
+    <h2>二、LoRA 权重合并数学原理</h2>
+    <div class="card">
+      <p>前向推理时，原始计算为 <code>y = Wx + (alpha / r) * B(Ax)</code>。利用矩阵乘法分配律，可离线合并为单一权重矩阵 <code>W'</code>：</p>
+      <pre><code>W' = W + (alpha / r) * (B @ A)
+
+# 其中：
+#   W  ∈ R^(m × n)  基座线性层权重
+#   B  ∈ R^(m × r)  LoRA 升维矩阵（零初始化）
+#   A  ∈ R^(r × n)  LoRA 降维矩阵（高斯初始化）
+#   r  &lt;&lt; min(m, n) 低秩秩数（如 8, 16, 32）</code></pre>
+      <p>合并后推理图与原生模型完全一致，实现<strong>零额外推理延迟（Zero Inference Overhead）</strong>。</p>
+    </div>
+
+    <h2>三、主流大模型量化格式选型对比（以 7B / 14B 为例）</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>量化格式</th>
+            <th>等效位宽</th>
+            <th>7B 估算体积</th>
+            <th>14B 估算体积</th>
+            <th>适用引擎与硬件场景</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>FP16</code></td>
+            <td>16.00 bpw</td>
+            <td>14.000 GB</td>
+            <td>28.000 GB</td>
+            <td>高显存 A100/H100 推理基线或量化校准源模型</td>
+          </tr>
+          <tr>
+            <td><code>GPTQ-4bit</code></td>
+            <td>4.25 bpw</td>
+            <td>3.719 GB</td>
+            <td>7.438 GB</td>
+            <td>基于 Hessian 误差补偿，适合 vLLM / ExLlamaV2 GPU 部署</td>
+          </tr>
+          <tr>
+            <td><code>AWQ-4bit</code></td>
+            <td>4.25 bpw</td>
+            <td>3.719 GB</td>
+            <td>7.438 GB</td>
+            <td>激活感知保护 1% 显著权重，泛化稳健且 vLLM 吞吐极高</td>
+          </tr>
+          <tr>
+            <td><code>GGUF-Q4_K_M</code></td>
+            <td>4.85 bpw</td>
+            <td>4.242 GB</td>
+            <td>8.484 GB</td>
+            <td>llama.cpp / Ollama 主流格式，支持 CPU / Apple Silicon 混合推理</td>
+          </tr>
+          <tr>
+            <td><code>GGUF-Q8_0</code></td>
+            <td>8.50 bpw</td>
+            <td>7.438 GB</td>
+            <td>14.875 GB</td>
+            <td>近无损 8-bit 本地私有化部署，适合高精度验收基准</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>四、课后思考与自测</h2>
+    <div class="card">
+      <details>
+        <summary>点击查看：为什么 4-bit 量化的 7B 模型不是严格的 3.5 GB（7 × 0.5 GB）？</summary>
+        <p>实际量化（如 GPTQ/AWQ 的 <code>group_size=128</code>）每 128 个 4-bit 权重需要额外存储 1 个 FP16 的缩放因子（scale）和 1 个 4-bit 零点（zero-point），加上部分敏感层（如 lm_head、LayerNorm）保留 FP16，等效位宽约为 <strong>4.25 ~ 4.85 bpw</strong>，因此 7B 模型实际体积约在 3.7 ~ 4.3 GB 之间。</p>
+      </details>
+      <details>
+        <summary>点击查看：运行验证命令</summary>
+        <pre><code>.venv/bin/python project_iterations/day_54/main.py
+.venv/bin/python scripts/verify_day.py --nb curriculum/stage_05_finetuning_and_deployment/day_54/notebook.ipynb --iter project_iterations/day_54</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
