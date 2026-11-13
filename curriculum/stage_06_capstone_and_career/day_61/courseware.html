@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 61 | 智枢企业级智能体平台 · 毕业设计开发日 3：多工具协同、持久化记忆与 HITL 审批</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第六阶段：毕业设计与就业冲刺 · Day 61（Capstone Dev Day 3）| 版本 v1.0.0-day61</div>
+      <h1>多工具协同、SQLite 持久化记忆与 HITL 人工审批编排</h1>
+      <p>企业需求驱动（Issue #061 · PM 林晓 &amp; Tech Lead 张工）：打造“财务比率计算 + 企业 RAG 检索 + PII 合规脱敏 + SQLite 断点记忆 + 高管报告 HITL 审批”生产闭环</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“能跑通”到“敢上线”）：</strong><br />
+      欢迎来到《智枢企业级智能体平台》毕业设计开发第 3 天（<strong>Day 61</strong>）！在真实金融与企业服务场景中，自动生成高管风险报告绝对不能“算完直接发出去”——万一原始输入夹带员工手机号或密钥怎么办？服务重启后多轮记忆和审批工单丢了怎么办？报告未经过风控总监签字就对外发布怎么办？今天，我们围绕 <strong>GitLab Issue #061</strong> 实现 <code>CapstoneAgentOrchestrator</code>，把多工具协同、PII 脱敏、SQLite 持久化与 HITL（Human-in-the-Loop）中断恢复机制全部拧成一股绳！
+    </div>
+
+    <h2>一、多工具协同与 HITL 审批时序架构</h2>
+    <div class="card">
+      <p>当用户发起高管风险报告发布请求时，编排器按“<strong>先脱敏 → 查历史 → 财务计算 → RAG 制度扩展检索 → 保存检查点并中断 → 人工审批恢复发布</strong>”的严谨链路执行：</p>
+      <div class="mermaid">
+        sequenceDiagram
+          autonumber
+          actor User as 企业用户
+          participant Orch as CapstoneAgentOrchestrator
+          participant Guard as ComplianceGuard
+          participant Mem as SQLiteMemoryStore
+          participant Fin as FinancialRatioTool
+          participant RAG as RAGSearchTool
+          actor Reviewer as 风控/财务复核人
+
+          User->>Orch: run(session_id, query, metrics, require_report_publish=True)
+          Orch->>Guard: redact(user_query)
+          Guard-->>Orch: sanitized_query + redaction_counts
+          Orch->>Mem: get_history() &amp; append_message("user", sanitized_query)
+          Orch->>Fin: calculate(metrics)
+          Fin-->>Orch: FinancialRatioResult (ROE, 资产负债率, risk_level)
+          Orch->>RAG: search(sanitized_query + risk_flags)
+          RAG-->>Orch: Top-K 企业风控与合规依据
+          Orch->>Guard: redact(draft_report)
+          Orch->>Mem: save_checkpoint(status="pending_approval")
+          Orch-->>User: OrchestratorResponse(status="pending_approval", approval_id)
+          Reviewer->>Orch: resume(approval_id, approved=True/False, reviewer)
+          Orch->>Mem: update_checkpoint_decision() &amp; save_published_report()
+          Orch-->>Reviewer: OrchestratorResponse(status="approved"/"rejected")
+      </div>
+    </div>
+
+    <h2>二、五大核心组件职责矩阵</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>核心组件</th>
+            <th>核心职责</th>
+            <th>工程与合规保障</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>FinancialRatioTool</code></td>
+            <td>计算 ROE、净利率、毛利率、资产负债率、流动比率与周转率</td>
+            <td>拦截零值/负资产非法输入，自动标注 <code>LOW / MEDIUM / HIGH</code> 风险等级</td>
+          </tr>
+          <tr>
+            <td><code>RAGSearchTool</code></td>
+            <td>基于 TF-IDF 余弦相似度检索企业风控与合规知识库</td>
+            <td>支持由 <code>risk_flags</code> 驱动的查询扩展，精准召回制度依据</td>
+          </tr>
+          <tr>
+            <td><code>ComplianceGuard</code></td>
+            <td>识别并脱敏手机号、身份证、银行卡、邮箱与 <code>sk-...</code> 密钥</td>
+            <td>“先脱敏、后落库”与报告草稿双重兜底，零明文 PII 持久化</td>
+          </tr>
+          <tr>
+            <td><code>SQLiteMemoryStore</code></td>
+            <td>持久化 <code>conversation_messages</code>、<code>hitl_checkpoints</code>、<code>published_reports</code></td>
+            <td>按 <code>session_id</code> 严格隔离，支持进程重启后跨实例接续执行</td>
+          </tr>
+          <tr>
+            <td><code>CapstoneAgentOrchestrator</code></td>
+            <td>统一编排 <code>run()</code> 与 <code>resume()</code> 状态机</td>
+            <td>强制高管报告先中断进入 <code>pending_approval</code>，防止重复审批（幂等保护）</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心编排代码片段速览</h2>
+    <div class="card">
+      <pre><code>from zhishu_agent import CapstoneAgentOrchestrator, FinancialMetricsInput
+
+agent = CapstoneAgentOrchestrator(db_path="/tmp/zhishu_capstone.db")
+
+# 1. 触发 HITL 中断：生成脱敏草稿并落盘检查点，绝不提前发布
+pause_res = agent.run(
+    session_id="exec-2026q3",
+    user_query="请评估星辰制造科技 Q3 财报并发布高管报告，联系人 13800138000。",
+    financial_metrics=metrics,
+    require_report_publish=True,
+)
+assert pause_res.status.value == "pending_approval"
+
+# 2. 模拟服务重启：新实例读取同一 SQLite 完成人工审批恢复
+resumed = CapstoneAgentOrchestrator(db_path="/tmp/zhishu_capstone.db").resume(
+    approval_id=pause_res.approval_id,
+    approved=True,
+    reviewer="风控总监-李明",
+    comment="指标口径核验无误，同意发布。",
+)
+print(resumed.published_report.report_id)</code></pre>
+    </div>
+
+    <h2>四、随堂思考与课后实战</h2>
+    <div class="card">
+      <p><strong>思考题 1：</strong>为什么在 <code>CapstoneAgentOrchestrator.run()</code> 中，要把 <code>FinancialRatioTool</code> 产出的 <code>risk_flags</code> 拼接到 <code>RAGSearchTool</code> 的查询词中？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>用户原始提问往往只包含“帮我评估 Q3 财报”等泛化表述，直接检索难以命中专业风控条款。通过工具结果驱动二次查询扩展（Tool-Driven Query Expansion），将“高杠杆预警”“流动比率”等精确信号注入检索词，可显著提升风控指引文档的 Top-K 召回率。</p>
+      </details>
+
+      <p style="margin-top: 16px;"><strong>思考题 2：</strong>如果前端因网络超时对同一个 <code>approval_id</code> 连续发送两次 <code>resume(..., approved=True)</code>，系统如何保证不会发布两份重复报告？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p><code>resume()</code> 首先校验检查点状态必须为 <code>PENDING_APPROVAL</code>，否则直接抛出 <code>ValueError</code> 拒绝重复审批；同时 SQLite 表 <code>published_reports</code> 对 <code>approval_id</code> 字段施加了 <code>UNIQUE</code> 约束，从代码状态机与数据库约束两个层面实现双保险。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
