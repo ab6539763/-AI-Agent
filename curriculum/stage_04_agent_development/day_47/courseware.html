@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 47 | 智枢企业级智能体平台 · Text-to-SQL 数据分析智能体</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：智能体开发与多智能体编排 · Day 47 | 版本 v0.4.0-day47</div>
+      <h1>实战场景：Text-to-SQL 企业数据分析智能体</h1>
+      <p>企业需求驱动（Issue #047）：构建 Schema 自省、自然语言转 SQL、只读安全护栏与中文商业洞察闭环</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（让业务人员用自然语言直接“对话数据库”）：</strong><br />
+      在企业日常运营中，“各大区目标达成率如何？”、“Top 5 畅销产品是谁？”这类临时取数需求非常高频。但直接把数据库交给大模型极其危险——既可能因幻觉写错列名，更可能被恶意诱导执行 <code>DROP TABLE</code> 或 <code>DELETE</code>。今天我们为智枢平台构建 <strong>SalesDatabase</strong>（SQLite 销售业务库）、<strong>validate_readonly_sql()</strong>（只读 SQL 硬护栏）与 <strong>TextToSQLAgent</strong>（自然语言问数与中文商业洞察引擎）。
+    </div>
+
+    <h2>一、Text-to-SQL 端到端数据流架构</h2>
+    <div class="card">
+      <p>每次自然语言问数均严格遵循“提问 → Schema 自省 → SQL 生成 → 只读安全护栏 → SQLite 执行 → 商业洞察”六步流水线：</p>
+      <div class="mermaid">
+        flowchart LR
+          Q(["Question: 自然语言提问"]) --> SCHEMA["Schema: introspect_schema()"]
+          SCHEMA --> GEN["SQL: generate_sql()"]
+          GEN --> GUARD{"AST/Keyword Guard: validate_readonly_sql()"}
+          GUARD -->|"含 DROP/DELETE/;/PRAGMA"| BLOCK(["拦截: SQLSecurityError"])
+          GUARD -->|"合法单条 SELECT"| DB[("SQLite: SalesDatabase")]
+          DB --> INSIGHT(["Insight: 中文商业洞察"])
+      </div>
+    </div>
+
+    <h2>二、三大核心模块与工程设计</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>核心组件</th>
+            <th>解决的业务与安全痛点</th>
+            <th>关键设计要点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>SalesDatabase</code></td>
+            <td>大模型缺乏真实表结构上下文，易产生字段幻觉</td>
+            <td>内置 <code>regions</code>、<code>products</code>、<code>orders</code> 三张关联表，开启外键约束；通过 <code>introspect_schema()</code> 提取真实 DDL 与行数。</td>
+          </tr>
+          <tr>
+            <td><code>validate_readonly_sql</code></td>
+            <td>提示词软约束易被越狱，存在删库/篡改/堆叠注入风险</td>
+            <td>严格限制首词为 <code>SELECT</code>，拦截分号 <code>;</code>、注释符 <code>--</code>/<code>/*</code> 以及 <code>DROP/DELETE/UPDATE/INSERT/ALTER/PRAGMA</code>。</td>
+          </tr>
+          <tr>
+            <td><code>TextToSQLAgent</code></td>
+            <td>仅有原始二维表格难以直接辅助管理层决策</td>
+            <td>串联 Schema 自省、NL 转 SQL（支持外部 <code>llm_fn</code> 或内置规则）、安全执行与 <code>summarize_insight()</code> 中文洞察摘要。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战示例</h2>
+    <div class="card">
+      <h3>1. 初始化销售库并运行 <code>TextToSQLAgent</code> 多表关联分析</h3>
+      <pre><code>from zhishu_agent import SalesDatabase, TextToSQLAgent
+
+with SalesDatabase(":memory:") as db:
+    db.initialize_and_seed()
+    agent = TextToSQLAgent(db=db)
+
+    res = agent.ask("各大区已完成订单的实际销售额与目标达成率是多少？")
+    print("生成 SQL:", res.generated_sql)
+    print("状态:", res.status, "| 返回行数:", len(res.rows))
+    print("商业洞察:", res.insight)</code></pre>
+    </div>
+
+    <h2>四、课后实战自测</h2>
+    <div class="card">
+      <p>完成以下 3 项验证，巩固 Day 47 工程能力（完整题目与答案见 <code>docs/homework_and_answers.md</code>）：</p>
+      <details>
+        <summary>点击查看自测要点</summary>
+        <ul>
+          <li>使用 <code>validate_readonly_sql()</code> 验证合法 <code>JOIN</code> 查询放行，并拦截 <code>DROP/DELETE/UPDATE/PRAGMA/;</code> 注入。</li>
+          <li>向 <code>TextToSQLAgent</code> 注入返回恶意 SQL 的 <code>llm_fn</code>，验证系统拦截且数据库数据完好无损。</li>
+          <li>运行多表 <code>JOIN</code> 问数，核对华东大区目标达成率超过 100% 并输出中文商业洞察。</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
