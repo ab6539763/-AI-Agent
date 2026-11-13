@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 68 | 智枢企业级智能体平台 · 面试专题（二）—— 项目深挖与系统设计</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container { max-width: 1040px; margin: 0 auto; padding: 32px 24px 80px; }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    .bad { border-left: 4px solid var(--rose); }
+    .good { border-left: 4px solid var(--green); }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 12px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
+    .tab-btn {
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .tab-btn.active { background: var(--accent); color: #0f172a; font-weight: 600; border-color: var(--accent); }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .checklist label { display: block; margin: 8px 0; cursor: pointer; }
+    .score-pill {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-weight: 700;
+      background: rgba(52, 211, 153, 0.15);
+      color: var(--green);
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="badge">星辰数科 · 智枢企业级智能体平台 | Stage 06 · Day 68 (v1.0.0-day68)</div>
+    <h1>面试专题（二）：项目深挖与 AI 系统设计</h1>
+    <p>PM 林晓 · Tech Lead 张工 · 全栈 AI 工程师 陈默 · QA 李婷 · DevOps 赵磊</p>
+  </div>
+
+  <div class="narrator">
+    <strong>🎙️ 讲师旁白：</strong>欢迎来到 Day 68！简历决定你能不能进面试间，而<strong>项目深挖（Deep-Dive）</strong>与<strong>AI 系统设计（System Design）</strong>决定你能不能拿到大厂高薪 Offer。今天我们在智枢平台中上线了 <code>system_design_sim</code> 评估器，用 6 大生产瓶颈 + SLA + 月度成本测算，帮你把“玩具级 Demo 架构”升级为“经得起面试官五连追问的高可用生产架构”。
+  </div>
+
+  <h2>一、Issue #068：AI 系统设计六大核心瓶颈</h2>
+  <div class="card">
+    <div class="mermaid">
+flowchart LR
+    U["高并发请求 (QPS / P99 SLA)"] --> GW["1. API Gateway 限流与背压"]
+    GW --> GUARD["安全护栏 (PII脱敏 / 注入拦截)"]
+    GUARD --> CACHE["2. Redis 语义缓存 (命中直出)"]
+    CACHE -- "Miss" --> VEC["3. 向量分片索引 (HNSW + BM25 + Rerank)"]
+    VEC --> RTR["4. 大小模型成本路由 (7B vs 旗舰)"]
+    RTR --> CB["5. 熔断降级与超时兜底"]
+    CB --> SSE["流式响应 (SSE)"]
+    GW -. "Trace & Metrics" .-> OBS["6. 全链路可观测性 (OTel / Langfuse)"]
+    </div>
+  </div>
+
+  <h2>二、企业团队实战对比：反面方案 vs 标杆方案</h2>
+  <div class="grid-2">
+    <div class="card bad">
+      <h3>❌ 初级直连方案（15/100 · D 级）</h3>
+      <ul>
+        <li>仅配置 <code>FastAPI + 单机 FAISS + GPT-4o API</code></li>
+        <li>无语义缓存：高频重复问题直击旗舰模型，月度账单高达 <strong>¥67,500</strong>（超预算 92%）</li>
+        <li>无网关限流与熔断：大促流量翻倍即雪崩</li>
+        <li>无全链路 Trace：无法定位 TTFT 与慢查询根因</li>
+      </ul>
+    </div>
+    <div class="card good">
+      <h3>✅ 智枢生产方案 v2.0（100/100 · S 级）</h3>
+      <ul>
+        <li><strong>向量索引</strong>：Milvus HNSW 分片 + BM25 混合检索 + Cross-Encoder 重排</li>
+        <li><strong>语义缓存</strong>：Redis 余弦 ≥ 0.92 命中直出，拦截 35% 请求</li>
+        <li><strong>成本路由</strong>：65% 简单问答路由至 Qwen-7B，月账单降至 <strong>¥18,525</strong></li>
+        <li><strong>高可用与监控</strong>：令牌桶限流 + 供应商熔断降级 + Langfuse/OTel 监控</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>三、高频 AI 系统设计题库（点击切换）</h2>
+  <div class="card">
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('kb', this)">1. 100万文档企业知识库</button>
+      <button class="tab-btn" onclick="switchTab('cs', this)">2. 高并发智能客服 (1000 QPS)</button>
+      <button class="tab-btn" onclick="switchTab('fin', this)">3. 多 Agent 金融研报助手</button>
+    </div>
+
+    <div id="tab-kb" class="tab-panel active">
+      <h3>场景指标：200 QPS | P99 ≤ 1200ms | 月预算 ¥35,000</h3>
+      <table>
+        <tr><th>面试官深挖追问</th><th>高分回答要点</th></tr>
+        <tr><td>2000万向量带部门 RBAC 权限过滤召回暴跌怎么办？</td><td>采用 Partition Key 物理分片 + Metadata Pre-filtering，避免 Post-filtering 剪枝过多。</td></tr>
+        <tr><td>每日增量更新 1 万篇文档如何近实时生效？</td><td>Kafka 异步消费 → Semantic Chunking → 幂等写入 Milvus，与在线检索读写分离。</td></tr>
+      </table>
+    </div>
+
+    <div id="tab-cs" class="tab-panel">
+      <h3>场景指标：1000 QPS | P99 ≤ 800ms | 月预算 ¥85,000</h3>
+      <table>
+        <tr><th>面试官深挖追问</th><th>高分回答要点</th></tr>
+        <tr><td>大促峰值翻 3 倍到 3000 QPS 如何防止雪崩？</td><td>Kong 令牌桶按租户限流 → FAQ 规则/Redis 语义缓存拦截 40%+ 流量 → 异步队列背压。</td></tr>
+        <tr><td>如何防止 Prompt 注入诱导 Agent 非法退款？</td><td>输入侧注入检测 + 高危 Tool Call 强制风控校验/HITL 人工二次确认。</td></tr>
+      </table>
+    </div>
+
+    <div id="tab-fin" class="tab-panel">
+      <h3>场景指标：50 QPS | P99 ≤ 8000ms | 月预算 ¥45,000</h3>
+      <table>
+        <tr><th>面试官深挖追问</th><th>高分回答要点</th></tr>
+        <tr><td>多 Agent 链路长达 8 步，死循环或工具失败怎么处理？</td><td>LangGraph 有界状态机限制 <code>max_iterations &lt;= 8</code>，每步 Checkpoint 持久化支持回滚。</td></tr>
+        <tr><td>如何彻底杜绝金融财报“数字幻觉”？</td><td>禁止 LLM 口算，所有同比/估值计算交由确定性 Python 沙箱执行，并强制 Citation 溯源校验。</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <h2>四、交互式面试自检清单（实时打分）</h2>
+  <div class="card checklist">
+    <p>勾选你在白板设计中已覆盖的架构要素，实时评估系统设计成熟度：<span id="live-score" class="score-pill">0 / 100 分</span></p>
+    <label><input type="checkbox" value="15" onchange="calcScore()" /> 1. 向量分片索引与混合检索（HNSW + BM25 + Rerank，+15分）</label>
+    <label><input type="checkbox" value="15" onchange="calcScore()" /> 2. Redis 语义缓存（余弦阈值拦截高频重复请求，+15分）</label>
+    <label><input type="checkbox" value="15" onchange="calcScore()" /> 3. 网关令牌桶限流与队列背压（RPM/TPM 双维度，+15分）</label>
+    <label><input type="checkbox" value="15" onchange="calcScore()" /> 4. 供应商熔断器与轻量模型降级兜底（+15分）</label>
+    <label><input type="checkbox" value="15" onchange="calcScore()" /> 5. OpenTelemetry / Langfuse 全链路可观测（+15分）</label>
+    <label><input type="checkbox" value="15" onchange="calcScore()" /> 6. 大小模型成本路由与租户 Token 配额（+15分）</label>
+    <label><input type="checkbox" value="10" onchange="calcScore()" /> 7. 明确给出 QPS/P99 SLA 估算与 PII/注入安全护栏（+10分）</label>
+  </div>
+</div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: "dark" });
+
+  function switchTab(id, btn) {
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.getElementById("tab-" + id).classList.add("active");
+    btn.classList.add("active");
+  }
+
+  function calcScore() {
+    let total = 0;
+    document.querySelectorAll(".checklist input[type='checkbox']:checked").forEach(cb => {
+      total += parseInt(cb.value, 10);
+    });
+    const grade = total >= 90 ? "S 级" : total >= 75 ? "A 级" : total >= 60 ? "B 级" : "待加强";
+    document.getElementById("live-score").textContent = `${total} / 100 分 (${grade})`;
+  }
+</script>
+</body>
+</html>
