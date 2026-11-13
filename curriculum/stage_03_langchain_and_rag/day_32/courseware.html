@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 32 | 智枢企业级智能体平台 · 高级 RAG Part 1：查询变换与上下文压缩</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 32 | 版本 v0.3.0-day32</div>
+      <h1>高级 RAG Part 1：Query Rewriting、Multi-Query、HyDE 与上下文压缩</h1>
+      <p>企业需求驱动（Issue #032）：打通“问得准 → 找得全 → 喂得精”的高级检索增强流水线</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从 Naive RAG 迈向 Advanced RAG）：</strong><br />
+      欢迎来到 Day 32！在真实企业知识库里，直接把用户原话拿去算向量相似度往往效果不佳：用户会用代词（“它有几天？”）、口语化短问（“Pod 老是 OOM 怎么办”），而召回的切片里又常常混杂无关废话。今天我们用四大工程组件全面升级检索链路：<code>QueryRewriter</code>、<code>MultiQueryRetriever</code>、<code>HyDERetriever</code> 与 <code>ContextCompressor</code>！
+    </div>
+
+    <h2>一、Advanced RAG Part 1 架构流水线</h2>
+    <div class="card">
+      <p>从用户原始提问到高信噪比压缩上下文，完整数据流转如下：</p>
+      <div class="mermaid">
+        flowchart TD
+          U["用户提问 + 对话历史"] --> QR["QueryRewriter (指代消解 + 口语清洗)"]
+          QR --> MQ["MultiQueryRetriever (多视角变体 + RRF 去重)"]
+          QR --> HYDE["HyDERetriever (假设文档生成 + 向量检索)"]
+          MQ --> RAW["召回原始切片集合"]
+          HYDE --> RAW
+          RAW --> CC["ContextCompressor (句级打分过滤 + 保序拼接)"]
+          CC --> LLM["高信噪比上下文 -> 注入 LLM 生成答案"]
+      </div>
+    </div>
+
+    <h2>二、四大核心组件拆解</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>组件名称</th><th>解决痛点</th><th>核心机制</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>QueryRewriter</code></td>
+            <td>多轮指代模糊、口语冗余词干扰</td>
+            <td>结合 <code>chat_history</code> 替换代词，清洗前后缀并扩展同义词</td>
+          </tr>
+          <tr>
+            <td><code>MultiQueryRetriever</code></td>
+            <td>单一问法表达偏差导致漏召回</td>
+            <td>生成 <code>num_queries</code> 个视角变体并行检索，RRF 融合去重</td>
+          </tr>
+          <tr>
+            <td><code>HyDERetriever</code></td>
+            <td>短问句与长文档语义分布不对齐</td>
+            <td>先生成假设答案文档，再用假设文档向量检索真实知识库</td>
+          </tr>
+          <tr>
+            <td><code>ContextCompressor</code></td>
+            <td>切片噪音多、Token 浪费、Lost in the Middle</td>
+            <td>句级相关性打分过滤，仅保留高相关句子并保持原文语序</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>核心调用示例</h3>
+      <pre><code>from zhishu_agent import (
+    ContextCompressor, HyDERetriever, LocalVectorStore, MultiQueryRetriever, QueryRewriter
+)
+
+# 1. 查询改写
+rewriter = QueryRewriter()
+clean_q = rewriter.rewrite("请问一下它一般有几天呀？", chat_history=[{"role": "user", "content": "年假制度"}])
+
+# 2. Multi-Query 多路召回 + RRF 去重
+mq = MultiQueryRetriever(retriever=store.as_retriever(search_kwargs={"k": 2}), num_queries=3)
+docs, variants = mq.retrieve_with_details("年假几天", k=2)
+
+# 3. HyDE 假设文档检索
+hyde = HyDERetriever(vector_store=store, k=2)
+hypo_doc, hyde_docs = hyde.retrieve_with_hypothesis("Pod 老是 OOM 怎么办")
+
+# 4. 上下文压缩
+compressor = ContextCompressor(min_score=0.18, max_sentences_per_doc=2)
+compressed = compressor.compress_documents("年假有几天", docs)</code></pre>
+    </div>
+
+    <h2>三、本地运行与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 32 演示脚本
+.venv/bin/python project_iterations/day_32/main.py
+
+# 2. 一键执行 Day 32 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_03_langchain_and_rag/day_32/notebook.ipynb \
+  --iter project_iterations/day_32</code></pre>
+      <details>
+        <summary>点击查看：为什么 ContextCompressor 筛选后要恢复原文句子顺序？</summary>
+        <p>如果只按相关性分数从高到低拼接句子，可能会把“结论句”排在“前提条件句”前面，破坏逻辑连贯性。按分数挑选 Top-N 句子后，再按原文索引 <code>idx</code> 升序排列，既能剔除噪音，又能保证大模型读到通顺的上下文。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
