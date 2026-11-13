@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 41 | 智枢企业级智能体平台 · LangGraph 状态机与审批流编排</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：智能体开发与多智能体编排 · Day 41 | 版本 v0.4.0-day41</div>
+      <h1>LangGraph 状态机编排：StateGraph、条件边、循环与人工审批流</h1>
+      <p>企业需求驱动（Issue #041）：从线性 DAG 迈向有向有环状态图，构建可控、可观测的 ReAct 循环与人工审批工作流</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（Stage 4 开篇）：</strong><br />
+      欢迎来到第四阶段！在 Stage 3 中，我们用 LCEL 搭出了企业级 RAG 问答链路。但真实的企业智能体不仅要“查知识”，还要会“<strong>自主调用工具、遇到报错重试、高风险操作暂停等人工审批</strong>”。这就要求工作流必须支持<strong>循环（Cycles）</strong>与<strong>共享状态机（State Machine）</strong>——这正是 LangGraph <code>StateGraph</code> 的核心价值！
+    </div>
+
+    <h2>一、为什么需要 LangGraph？核心概念与状态图拓扑</h2>
+    <div class="card">
+      <p>一个标准的 <code>StateGraph</code> 由三大要素构成：<strong>全局 State</strong>（含 <code>Annotated</code> 归约器）、<strong>Node（节点函数）</strong>、<strong>Edge / Conditional Edge（普通边与条件边）</strong>。</p>
+      <div class="mermaid">
+        stateDiagram-v2
+          [*] --> risk_assess
+          risk_assess --> auto_approve : low_risk (<= 1000元)
+          risk_assess --> human_review : high_risk (超额或高危操作)
+          auto_approve --> execute_action
+          human_review --> execute_action : approved
+          human_review --> reject_action : rejected
+          execute_action --> [*]
+          reject_action --> [*]
+      </div>
+    </div>
+
+    <h2>二、StateGraph 核心 API 速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>API / 符号</th>
+            <th>作用说明</th>
+            <th>企业工程注意点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>START</code> / <code>END</code></td>
+            <td>状态图虚拟入口与终止哨兵节点</td>
+            <td>编译前必须存在至少一条从 <code>START</code> 出发的边</td>
+          </tr>
+          <tr>
+            <td><code>add_node(name, fn)</code></td>
+            <td>注册状态处理节点，接收 <code>state</code> 并返回增量字典</td>
+            <td>节点函数保持纯函数风格，仅返回需更新的字段</td>
+          </tr>
+          <tr>
+            <td><code>add_conditional_edges()</code></td>
+            <td>根据路由函数返回值动态决定下一跳节点</td>
+            <td>建议显式传入 <code>path_map</code>，便于 <code>to_mermaid()</code> 静态导出</td>
+          </tr>
+          <tr>
+            <td><code>Annotated[list, operator.add]</code></td>
+            <td>声明字段归约器（Reducer），增量追加而非覆盖</td>
+            <td>非常适合累积 <code>messages</code> 对话历史与 <code>audit_log</code> 审计日志</td>
+          </tr>
+          <tr>
+            <td><code>compile()</code> / <code>stream()</code></td>
+            <td>校验拓扑并流式执行，支持 <code>recursion_limit</code></td>
+            <td>所有循环图必须配合业务上限 + <code>recursion_limit</code> 双重守卫</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：ReAct 循环图与人工审批流</h2>
+    <div class="card">
+      <pre><code>from zhishu_agent import build_approval_graph, build_react_graph
+
+# 1. ReAct 工具调用循环图：reason -> tools -> reason -> END
+react_app = build_react_graph(max_iterations=5)
+print(react_app.to_mermaid())
+
+for step in react_app.stream({"query": "请帮我计算 25 * 4", "messages": [], "iteration": 0}):
+    print(step)
+
+# 2. 高风险操作/费用报销人工审批流
+approval_app = build_approval_graph(auto_approve_limit=1000.0)
+res = approval_app.invoke({
+    "request_id": "REQ-2026-01",
+    "action_type": "expense",
+    "amount": 3200.0,
+    "human_decision": True,
+    "audit_log": [],
+})
+print(res["approval_status"], res["execution_result"])</code></pre>
+    </div>
+
+    <h2>四、课后思考与工程防坑</h2>
+    <div class="card">
+      <p><strong>思考 1：</strong>为什么 ReAct 状态图在状态设计上推荐使用 <code>Annotated[list, operator.add]</code> 来管理 <code>messages</code>？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>如果每次节点都必须手动拷贝并拼接完整历史列表，代码既冗余又容易在并发或分支节点中丢失消息。使用 <code>Annotated[list, operator.add]</code> 后，节点只需返回本轮新增的 <code>{"messages": [new_msg]}</code>，图引擎会自动将新消息安全追加到全局状态中。</p>
+      </details>
+
+      <p style="margin-top: 16px;"><strong>思考 2：</strong>如果 <code>human_review</code> 节点既没有配置 <code>approver_fn</code>，请求中也未传入 <code>human_decision</code>，应该默认通过还是驳回？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>必须<strong>默认驳回（Fail-Closed）</strong>！在企业安全架构中，涉及生产数据库变更、大额资金划拨的高风险分支，任何未获得明确人工授权的情况都必须拒绝执行并写入 <code>audit_log</code>。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
