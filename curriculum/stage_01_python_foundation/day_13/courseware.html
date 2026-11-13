@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 13 | 智枢企业级智能体平台 · Python 高级工程特性</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 2 周 · Day 13 | 版本 v0.1.0-day13</div>
+      <h1>Python 高级工程特性：装饰器、生成器、asyncio 与安全配置</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》高可用与高并发底座升级 —— 异常重试、耗时监控、流式输出、异步并发与密钥脱敏</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      欢迎来到第 13 天！如果说 Day 08-09 的面向对象帮你搭好了平台的“骨架”，那么今天这四个高阶特性就是让平台真正扛住线上流量的“神经与血管”。线上大模型 API 经常遇到 429 限流或网络抖动，总不能在每个函数里复制粘贴 <code>try...except</code>；多条 Prompt 批量评测如果串行等待，老板和用户都会嫌慢；而把明文 <code>API_KEY</code> 写进代码更是生产事故红线。今天我们用 <strong>装饰器 + <code>yield</code> 生成器 + <code>asyncio.gather</code> + 纯标准库 <code>.env</code> 加载器</strong> 一次解决全部痛点！
+    </div>
+
+    <h2>一、上午：企业需求 PRD 与系统架构流程</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #013（林晓 / 张工 联合提出）：</strong>为智枢平台补充高可用装饰器、流式 Token 生成器、异步并发批处理接口，以及零第三方依赖的 <code>.env</code> 安全配置加载器。</p>
+      <div class="mermaid">
+        flowchart TD
+          ENV[".env 配置文件 / os.environ"] -->|load_agent_config| CFG["AgentConfig (api_key 自动脱敏)"]
+          REQ["Prompt 请求"] --> DEC["装饰器增强层<br/>@log_latency + @retry_on_error"]
+          DEC -->|瞬态异常| RETRY["自动等待并重试"]
+          RETRY --> DEC
+          DEC -->|单条流式| GEN["stream_tokens(text)<br/>yield 惰性切片"]
+          DEC -->|批量并发| ASYNC["async_batch_ask(prompts)<br/>asyncio.gather 并发调度"]
+      </div>
+    </div>
+
+    <h2>二、上午实操：装饰器 <code>@retry_on_error</code> 与 <code>@log_latency</code></h2>
+    <div class="card">
+      <p>对应仓库 <code>project_iterations/day_13/zhishu_agent/decorators.py</code>，使用 <code>@functools.wraps(func)</code> 保留原函数元信息，结合 <code>typing.TypeVar</code> 保持类型提示完整：</p>
+      <pre><code>import functools
+import time
+from typing import Any, Callable, TypeVar
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+def retry_on_error(max_retries: int = 3, delay: float = 0.01) -&gt; Callable[[F], F]:
+    """异常自动重试装饰器。"""
+    def decorator(func: F) -&gt; F:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -&gt; Any:
+            last_exc: BaseException | None = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt &lt; max_retries and delay &gt; 0:
+                        time.sleep(delay)
+            assert last_exc is not None
+            raise last_exc
+        return wrapper  # type: ignore[return-value]
+    return decorator
+
+def log_latency(func: F) -&gt; F:
+    """函数执行耗时日志装饰器（单位：ms）。"""
+    @functools.wraps(func)
+    def wrapper(*args: Any, **kwargs: Any) -&gt; Any:
+        start = time.perf_counter()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            elapsed_ms = (time.perf_counter() - start) * 1000
+            print(f"[Latency] {func.__name__} 耗时 {elapsed_ms:.2f} ms")
+    return wrapper  # type: ignore[return-value]</code></pre>
+    </div>
+
+    <h2>三、下午实操：生成器 <code>yield</code> 与 <code>asyncio.gather</code> 并发</h2>
+    <div class="card">
+      <p>对应仓库 <code>project_iterations/day_13/zhishu_agent/streaming.py</code>：</p>
+      <pre><code>import asyncio
+from collections.abc import Iterator
+
+def stream_tokens(text: str, chunk_size: int = 1) -&gt; Iterator[str]:
+    """使用 yield 生成器按切片流式吐出文本 Token（惰性求值）。"""
+    for idx in range(0, len(text), chunk_size):
+        yield text[idx : idx + chunk_size]
+
+async def _async_single_ask(prompt: str, model_name: str = "deepseek-chat", delay: float = 0.01) -&gt; str:
+    await asyncio.sleep(delay)
+    return f"[{model_name}] 已异步处理: {prompt.strip()}"
+
+async def async_batch_ask(prompts: list[str], model_name: str = "deepseek-chat", delay: float = 0.01) -&gt; list[str]:
+    """使用 asyncio.gather 并发执行多条 Prompt 请求，保持返回顺序。"""
+    tasks = [_async_single_ask(p, model_name=model_name, delay=delay) for p in prompts]
+    return list(await asyncio.gather(*tasks))</code></pre>
+    </div>
+
+    <h2>四、下午实操：零依赖 <code>.env</code> 安全配置与密钥脱敏</h2>
+    <div class="card">
+      <p>对应仓库 <code>project_iterations/day_13/zhishu_agent/config.py</code>，纯标准库解析 <code>.env</code>，且默认 <code>override=False</code> 不覆盖宿主机/CI 环境变量，并在 <code>AgentConfig.__repr__</code> 中自动脱敏 <code>api_key</code>：</p>
+      <pre><code>def mask_secret(secret: str, visible_tail: int = 4) -&gt; str:
+    if not secret:
+        return "&lt;EMPTY&gt;"
+    if len(secret) &lt;= visible_tail:
+        return "*" * len(secret)
+    return f"{'*' * 4}...{secret[-visible_tail:]}"</code></pre>
+    </div>
+
+    <h2>五、课堂笔记：今日核心知识速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>知识点</th><th>核心关键字 / API</th><th>在 Agent 平台中的真实用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>装饰器</td><td><code>@functools.wraps</code></td><td>无侵入地为工具/模型调用增加重试、耗时日志、权限校验</td></tr>
+          <tr><td>生成器</td><td><code>yield</code> / <code>Iterator[str]</code></td><td>打字机流式响应（SSE）、RAG 大文档惰性分块防 OOM</td></tr>
+          <tr><td>异步并发</td><td><code>async def</code> / <code>asyncio.gather</code></td><td>同时检索多个知识库或并发评测批量 Prompt，大幅降低延迟</td></tr>
+          <tr><td>类型注解</td><td><code>TypeVar</code> / <code>Callable</code></td><td>让 IDE 精确补全被装饰函数的参数与返回值类型</td></tr>
+          <tr><td>安全配置</td><td><code>os.environ</code> / <code>os.getenv</code></td><td>隔离开发/生产密钥，日志脱敏防止 API Key 泄露</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>六、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1（装饰器）：</strong>编写 <code>@retry_on_error(max_retries=3, delay=0.01)</code>，验证前 2 次抛错第 3 次成功且保留 <code>__name__</code>。</p>
+      <p><strong>作业 2（生成器）：</strong>使用 <code>yield</code> 实现文档分块生成器 <code>chunk_document(text, chunk_size=5)</code>。</p>
+      <p><strong>作业 3（异步并发）：</strong>使用 <code>asyncio.gather</code> 并发查询 3 个知识库并用 <code>asyncio.run</code> 验证耗时。</p>
+      <details>
+        <summary>点击展开完整参考答案（详见 docs/homework_and_answers.md）</summary>
+        <pre><code># 作业 2 核心代码：
+def chunk_document(text: str, chunk_size: int = 5):
+    if chunk_size &lt;= 0:
+        raise ValueError("chunk_size 必须大于 0")
+    for start in range(0, len(text), chunk_size):
+        yield text[start : start + chunk_size]
+
+# 作业 3 核心代码：
+async def query_all_sources(question: str) -&gt; list[str]:
+    sources = ["产品文档库", "财务制度库", "技术架构库"]
+    tasks = [query_source(src, question, delay=0.05) for src in sources]
+    return list(await asyncio.gather(*tasks))</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
