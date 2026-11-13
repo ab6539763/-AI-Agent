@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 30 | 智枢企业级智能体平台 · 端到端 RAG 问答系统（核心日）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 30（核心日）| 版本 v0.3.0-day30</div>
+      <h1>端到端 RAG 问答系统：检索增强、引用溯源与安全拒答</h1>
+      <p>企业需求驱动（Issue #030）：打通 Load → Split → Embed → Store → Retrieve → Generate + Citation 全链路</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（Stage 3 里程碑）：</strong><br />
+      欢迎来到 Day 30 核心实战课！前两天我们分别攻克了“文档切分”与“向量检索”。今天我们将把所有积木拼装成一座真正可用的<strong>企业级 RAG 问答系统</strong>：不仅能回答员工制度与技术运维问题，还能在每条结论后附上精确的 <code>[1][2]</code> 来源引用；一旦遇到知识库之外的问题，立刻触发阈值拦截并回复<strong>“我不知道/知识库中未找到相关信息”</strong>！
+    </div>
+
+    <h2>一、端到端 RAG 架构流水线</h2>
+    <div class="card">
+      <p>从文档切片入库到带引用生成与低相似度安全拒答，完整数据流转如下：</p>
+      <div class="mermaid">
+        flowchart LR
+          L["Load 加载文档"] --> S["Split 文本切分"]
+          S --> E["Embed 向量化"]
+          E --> ST["Store 写入向量库"]
+          ST --> R["Retrieve Top-K 检索"]
+          R --> TH{"max_score >= threshold?"}
+          TH -->|"否"| FB["安全拒答 grounded=False"]
+          TH -->|"是"| P["build_rag_prompt 构造上下文"]
+          P --> G["Generate + Citation (grounded=True)"]
+      </div>
+    </div>
+
+    <h2>二、四大核心阶段拆解</h2>
+    <div class="card">
+      <h3>1. 流水线核心接口一览</h3>
+      <table>
+        <thead>
+          <tr><th>阶段函数 / 方法</th><th>输入</th><th>输出与职责</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>ingest_documents</code></td><td>文档列表、<code>chunk_size</code>、<code>chunk_overlap</code></td><td>切分长文本、保留来源元数据并向量化入库</td></tr>
+          <tr><td><code>retrieve</code></td><td><code>query</code>、<code>k</code>、<code>filter_metadata</code></td><td>执行元数据预过滤与余弦相似度 Top-K 召回</td></tr>
+          <tr><td><code>build_rag_prompt</code></td><td><code>query</code>、<code>retrieved_docs</code></td><td>组装带 <code>[1][2]</code> 编号的上下文与防幻觉指令</td></tr>
+          <tr><td><code>answer_with_citations</code></td><td><code>query</code>、<code>min_score_threshold</code></td><td>返回结构化 <code>RAGAnswer(answer, citations, grounded)</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>2. 核心调用示例</h3>
+      <pre><code>from zhishu_agent import Document, RAGPipeline
+
+pipeline = RAGPipeline(min_score_threshold=0.15, default_k=2)
+pipeline.ingest_documents([
+    Document(
+        id="hr-001",
+        page_content="员工入职满1年享受5天带薪年假，满10年享受10天带薪年假。",
+        metadata={"source": "《员工手册 2025》", "department": "hr"},
+    )
+])
+
+res = pipeline.answer_with_citations("员工带薪年假有多少天？")
+print(res.grounded, res.answer)
+for cite in res.citations:
+    print(f"[{cite.index}] {cite.source} (score={cite.score:.4f})")</code></pre>
+    </div>
+
+    <h2>三、本地运行与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 30 端到端 RAG 演示脚本
+.venv/bin/python project_iterations/day_30/main.py
+
+# 2. 一键执行 Day 30 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_03_langchain_and_rag/day_30/notebook.ipynb \
+  --iter project_iterations/day_30</code></pre>
+      <details>
+        <summary>点击查看：为什么低相似度必须触发“我不知道/知识库中未找到相关信息”？</summary>
+        <p>Top-K 检索总会返回库里“相对最接近”的片段，即使它们与用户问题毫无关系。通过 <code>min_score_threshold</code> 卡控最高相似度，可以在进入生成阶段前主动阻断无关上下文，将幻觉风险降至最低。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
