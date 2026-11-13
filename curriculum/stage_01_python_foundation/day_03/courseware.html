@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 03 | 智枢企业级智能体平台 · 流程控制与 CLI 路由调度</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 1 周 · Day 03 | 版本 v0.1.0-day03</div>
+      <h1>流程控制与多轮交互路由：智枢平台 CLI 调度中心</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》—— 嵌套条件权限分级、批量 Prompt 清洗引擎（for + continue + break）与 while True 交互菜单路由</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      欢迎来到研发第 3 天！昨天我们写好了 Prompt 脱敏引擎，但程序还像一根“直肠子”，跑完一次就退出了。今天产品经理林晓和 Tech Lead 张工下发了 <strong>GitLab Issue #003</strong>：智枢平台需要一个能“看人下菜碟”的权限检查器（<code>if/elif/else</code>），一个能批量过滤无效与终止指令的 Prompt 清洗流水线（<code>for</code> + <code>continue</code> + <code>break</code>），以及一个永不主动掉线的命令行主菜单（<code>while True</code>）。掌握了这三大流程控制武器，你的代码才真正具备了“智能决策”的雏形！
+    </div>
+
+    <h2>一、上午：控制流全景与智枢路由调度架构</h2>
+    <div class="card">
+      <p>在真实 Agent 系统中，控制流决定了智能体的<strong>条件分支决策</strong>、<strong>批处理重试与熔断</strong>以及<strong>多轮对话事件循环</strong>。Day 03 的系统调度架构如下：</p>
+      <div class="mermaid">
+        flowchart TD
+          Start(["while True 主循环"]) --> Menu["展示菜单 0-4"]
+          Menu --> Dispatch{"run_menu_dispatch(choice, context)"}
+          Dispatch -->|"1"| Access["check_access_level()<br/>嵌套 if/elif/else"]
+          Dispatch -->|"2"| Batch["batch_clean_prompts()<br/>for + continue + break"]
+          Dispatch -->|"3"| Table["generate_multiplication_table()<br/>双层嵌套 for 循环"]
+          Dispatch -->|"4"| Env["get_environment_info()<br/>环境自检"]
+          Dispatch -->|"0"| Exit(["break 退出循环"])
+      </div>
+    </div>
+
+    <h2>二、核心知识点精讲：条件嵌套与循环控制</h2>
+    <div class="card">
+      <h3>1. 嵌套 <code>if / elif / else</code>：权限分级防线</h3>
+      <p>外层先判断“是否已开通大模型权限（<code>llm_enabled</code>）”，内层再根据工龄与预算划分 <code>VIP</code>、<code>STANDARD</code> 与 <code>DENIED</code>。先守住总闸门，再细分等级，能有效防止逻辑漏洞。</p>
+      <h3>2. <code>for</code> 循环中的 <code>continue</code> 与 <code>break</code></h3>
+      <ul>
+        <li><code>continue</code>：跳过当前这一轮（例如遇到空字符串 Prompt），直接进入下一轮循环。</li>
+        <li><code>break</code>：立即终止整个循环（例如在批处理队列中遇到 <code>"STOP"</code> 停止词，或用户在 <code>while True</code> 菜单输入 <code>"0"</code>）。</li>
+      </ul>
+    </div>
+
+    <h2>三、下午实操：核心代码逐行解析（可直接运行）</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_03/zhishu_agent/router.py</code>：</p>
+      <pre><code>def check_access_level(years_exp: int, llm_enabled: bool, budget: float) -&gt; str:
+    """嵌套 if/elif/else 判断智枢平台访问权限等级。"""
+    if llm_enabled:
+        if years_exp &gt;= 3 and budget &gt;= 50.0:
+            return "VIP"
+        elif budget &gt; 0 and (years_exp &gt;= 1 or budget &gt;= 10.0):
+            return "STANDARD"
+        else:
+            return "DENIED"
+    else:
+        return "DENIED"
+
+
+def batch_clean_prompts(prompts: list[str], stop_keyword: str = "STOP") -&gt; list[str]:
+    """for 循环批量清洗 Prompt：遇空跳过(continue)，遇停止词终止(break)。"""
+    cleaned_list: list[str] = []
+    for raw_prompt in prompts:
+        stripped = raw_prompt.strip()
+        if not stripped:
+            continue                # 跳过空白 Prompt
+        if stripped == stop_keyword:
+            break                   # 遇到停止词立即退出批处理
+        cleaned_list.append(" ".join(stripped.split()))
+    return cleaned_list
+
+
+def generate_multiplication_table(n: int = 9) -&gt; str:
+    """经典嵌套 for 循环生成下三角乘法口诀表。"""
+    rows: list[str] = []
+    for i in range(1, n + 1):
+        cols = [f"{j}×{i}={i * j:&lt;2}" for j in range(1, i + 1)]
+        rows.append("  ".join(cols).rstrip())
+    return "\n".join(rows)
+
+
+if __name__ == "__main__":
+    print("权限等级:", check_access_level(3, True, 60.0))
+    print("清洗结果:", batch_clean_prompts(["  你好 ", "", "STOP", "被忽略"]))
+    print(generate_multiplication_table(4))</code></pre>
+    </div>
+
+    <h2>四、课堂笔记：今日核心知识速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>知识点</th><th>Python 语法</th><th>在 Agent 工程中的真实用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>嵌套条件分支</td><td><code>if / elif / else</code></td><td>权限鉴权、意图路由、多级降级策略</td></tr>
+          <tr><td>遍历与跳过</td><td><code>for ... in ...: continue</code></td><td>跳过无效文档切片、空消息过滤</td></tr>
+          <tr><td>提前终止循环</td><td><code>break</code></td><td>遇到停止词 <code>STOP</code> 熔断、退出交互循环</td></tr>
+          <tr><td>事件主循环</td><td><code>while True:</code></td><td>CLI 多轮对话引擎、Agent ReAct 思考循环</td></tr>
+          <tr><td>嵌套循环</td><td>双层 <code>for</code> 循环</td><td>二维矩阵遍历、批量 Prompt×模型 评测组合</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>五、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1（猜数字游戏逻辑）：</strong>使用 <code>while</code> 循环与 <code>if/elif/else</code> 实现带最大尝试次数限制的猜数字逻辑。</p>
+      <p><strong>作业 2（9×9 乘法口诀表）：</strong>使用双层嵌套 <code>for</code> 循环打印对齐的 9×9 下三角口诀表。</p>
+      <p><strong>作业 3（LeetCode Easy 双题）：</strong>实现「两数之和（Two Sum）」与「回文数（Palindrome Number）」。</p>
+      <details>
+        <summary>点击展开完整参考答案</summary>
+        <pre><code># 作业 1：猜数字游戏逻辑
+def guess_number_game(secret: int, guesses: list[int], max_attempts: int = 5) -&gt; str:
+    attempt = 0
+    while attempt &lt; max_attempts and attempt &lt; len(guesses):
+        guess = guesses[attempt]
+        attempt += 1
+        if guess == secret:
+            return f"恭喜猜中！共用了 {attempt} 次。"
+        elif guess &gt; secret:
+            print(f"第 {attempt} 次 ({guess}): 太大了")
+        else:
+            print(f"第 {attempt} 次 ({guess}): 太小了")
+    return f"挑战失败，正确答案是 {secret}。"
+
+
+# 作业 2：9x9 乘法口诀表
+for i in range(1, 10):
+    print("  ".join(f"{j}×{i}={i*j:&lt;2}" for j in range(1, i + 1)))
+
+
+# 作业 3A：两数之和 (Two Sum)
+def two_sum(nums: list[int], target: int) -&gt; list[int]:
+    seen: dict[int, int] = {}
+    for idx, num in enumerate(nums):
+        if target - num in seen:
+            return [seen[target - num], idx]
+        seen[num] = idx
+    return []
+
+
+# 作业 3B：回文数 (Palindrome Number)
+def is_palindrome(x: int) -&gt; bool:
+    if x &lt; 0 or (x % 10 == 0 and x != 0):
+        return False
+    rev = 0
+    while x &gt; rev:
+        rev = rev * 10 + x % 10
+        x //= 10
+    return x == rev or x == rev // 10</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
