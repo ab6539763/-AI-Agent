@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 51 | 智枢企业级智能体平台 · 模型微调理论、决策树与 GPU 显存预算计算器</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第五阶段：模型微调与生产部署 · Day 51 | 版本 v0.5.0-day51</div>
+      <h1>大模型微调理论、技术路线决策树与 GPU 显存预算计算器</h1>
+      <p>企业需求驱动（Issue #051）：私有化垂类模型适配路线评估与 Full-FP16 / LoRA / QLoRA 算力精准核算</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（不要用微调解决 RAG 的问题，也不要用蛮力估算显存）：</strong><br />
+      欢迎来到 Stage 5！在企业私有化项目中，最昂贵的弯路莫过于“需求明明适合 RAG，却花两周去微调基座”或“买了 24G 显卡才发现 7B 全量微调需要 108G 显存”。今天在 <strong>Day 51</strong>，我们将把架构决策与硬件预算全部工程化，打造 <code>vram_calculator.py</code>。
+    </div>
+
+    <h2>一、Prompt vs RAG vs LoRA vs QLoRA 决策树</h2>
+    <div class="card">
+      <p>通过四个核心工程变量（实时知识需求、风格/格式约束、标注集完备度、延迟 SLA）确定最佳模型适配路径：</p>
+      <div class="mermaid">
+        flowchart TD
+          START(["私有化模型需求评估"]) --> FRESH{"需要实时/动态知识?"}
+          FRESH -->|"是"| STYLE1{"需要定制风格/严格格式?"}
+          FRESH -->|"否"| STYLE2{"需要定制风格/严格格式?"}
+          STYLE1 -->|"否"| RAG(["RAG 外挂检索增强"])
+          STYLE1 -->|"是"| DATA1{"已有高质量标注集?"}
+          STYLE2 -->|"否"| PROMPT(["Prompt Engineering"])
+          STYLE2 -->|"是"| DATA2{"已有高质量标注集?"}
+          DATA1 -->|"否"| RAG_FS(["RAG + Few-Shot 先行"])
+          DATA1 -->|"是"| LAT1{"延迟预算 < 500ms?"}
+          DATA2 -->|"否"| PROMPT_FS(["Prompt + Few-Shot 先行"])
+          DATA2 -->|"是"| LAT2{"延迟预算 < 500ms?"}
+          LAT1 -->|"是"| LORA1(["LoRA-FP16 + RAG"])
+          LAT1 -->|"否"| QLORA1(["QLoRA-4bit + RAG"])
+          LAT2 -->|"是"| LORA2(["LoRA-FP16"])
+          LAT2 -->|"否"| QLORA2(["QLoRA-4bit"])
+      </div>
+    </div>
+
+    <h2>二、Qwen2.5-7B 训练显存五大分项对比（batch=1, seq=2048, r=16）</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>训练范式</th>
+            <th>权重 (Weights)</th>
+            <th>梯度 (Gradients)</th>
+            <th>AdamW 优化器</th>
+            <th>激活 + 开销</th>
+            <th>总显存 &amp; GPU 推荐</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Full-FP16</strong></td>
+            <td>13.04 GB</td>
+            <td>13.04 GB</td>
+            <td>78.23 GB (12B/param)</td>
+            <td>4.66 GB</td>
+            <td><strong>108.97 GB</strong> → Multi-GPU x2</td>
+          </tr>
+          <tr>
+            <td><strong>LoRA-FP16</strong></td>
+            <td>13.14 GB</td>
+            <td>0.10 GB</td>
+            <td>0.63 GB</td>
+            <td>3.44 GB</td>
+            <td><strong>17.31 GB</strong> → RTX 4090 24G</td>
+          </tr>
+          <tr>
+            <td><strong>QLoRA-4bit</strong></td>
+            <td>3.69 GB (NF4)</td>
+            <td>0.10 GB</td>
+            <td>0.31 GB (Paged 8-bit)</td>
+            <td>3.44 GB</td>
+            <td><strong>7.55 GB</strong> → RTX 4090 24G</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：策略决策与显存评估</h2>
+    <div class="card">
+      <pre><code>from zhishu_agent import (
+    estimate_training_vram_gb,
+    recommend_adaptation_strategy,
+    recommend_gpu,
+)
+
+rec = recommend_adaptation_strategy(
+    needs_fresh_knowledge=False,
+    needs_style_or_format=True,
+    has_labeled_data=True,
+    latency_budget_ms=1200,
+)
+vram = estimate_training_vram_gb(7.0, method="QLoRA-4bit", batch_size=1, seq_len=2048, lora_rank=16)
+gpu = recommend_gpu(vram.total_gb)
+print(rec.strategy, vram.total_gb, gpu.tier)</code></pre>
+    </div>
+
+    <h2>四、高频架构面试 Q&amp;A</h2>
+    <div class="card">
+      <details>
+        <summary>Q1：为什么 QLoRA 推理延迟通常略高于合并后的 LoRA-FP16？</summary>
+        <p>QLoRA 在 4-bit NF4 权重上进行计算时需要在前向传播动态反量化为 FP16/BF16；而 LoRA-FP16 可通过 <code>merge_and_unload()</code> 将旁路矩阵直接加回 FP16 权重，推理阶段零额外延迟。</p>
+      </details>
+      <details>
+        <summary>Q2：为什么减小 batch_size 后 QLoRA 显存仍可能超过 24G？</summary>
+        <p>当 <code>seq_len</code> 极大（如 8192+）或模型参数达到 32B+ 时，激活值显存与模型权重之和会突破 24G 上限，此时需结合 Gradient Checkpointing、FlashAttention-2 或升级至 A100 40G/80G。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
