@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 59 | 智枢企业级智能体平台 · Capstone Day 1：项目骨架与财务合规知识库构建</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第六阶段：企业级综合实战与求职冲刺 · Day 59 | 版本 v1.0.0-day59</div>
+      <h1>Capstone Dev Day 1：项目骨架与企业财务/合规知识库构建</h1>
+      <p>企业需求驱动（Issue #059）：从零搭建 Capstone 独立工程骨架，实现 `.md` / `.csv` 财报与合规文档的元数据切分及 JSON/SQLite 双路持久化</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（Capstone 实战正式启航）：</strong><br />
+      前面 58 天我们掌握了从 Python 基础、RAG 检索、多智能体协同到模型微调与安全合规网关的全套技能。从今天（<strong>Day 59</strong>）开始，我们将进入最终的 <strong>Capstone 毕业级综合项目实战</strong>：打造面向企业财务与合规部门的生产级智能体平台。Day 1 的核心目标是夯实“工程骨架”与“结构化知识库底座（<code>CapstoneKBInitializer</code>）”。
+    </div>
+
+    <h2>一、Capstone Day 1 知识库构建流水线</h2>
+    <div class="card">
+      <p>企业财务与合规语料通常混合了非结构化制度文档（<code>.md</code>）与结构化台账（<code>.csv</code>）。为了支持后续高精度混合检索与权限/财年过滤，我们在入库阶段强制完成：<strong>目录扫描 → 元数据提取 → 语义切片 → JSON 审计快照 &amp; SQLite 幂等持久化</strong>。</p>
+      <div class="mermaid">
+        flowchart LR
+          CORPUS["企业语料 (.md / .csv)"] --> SCAN["ingest_directory()"]
+          SCAN --> META["extract_metadata(): department / fiscal_year / doc_type"]
+          META --> MD["parse_markdown(): 标题分节 + 滑动窗口"]
+          META --> CSV["parse_csv(): 批次行聚合保留表头"]
+          MD --> CHUNK["KBChunk (确定性 chunk_id)"]
+          CSV --> CHUNK
+          CHUNK --> JSON["save_json_index(): kb_index.json"]
+          CHUNK --> SQLITE["save_sqlite_index(): kb_index.sqlite"]
+          SQLITE --> QUERY["query_sqlite(): 元数据过滤检索"]
+      </div>
+    </div>
+
+    <h2>二、核心设计要点与元数据规范</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>字段 / 模块</th>
+            <th>设计规范</th>
+            <th>工程价值</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>department</code></td>
+            <td>优先解析 Frontmatter，其次匹配文件名关键词，最后回退正文</td>
+            <td>避免财务台账因某行出现 <code>compliance</code> 字样而被误分类</td>
+          </tr>
+          <tr>
+            <td><code>fiscal_year</code></td>
+            <td>统一标准化为 <code>FY2025</code> / <code>FY2026</code> 格式</td>
+            <td>支持按财年精准隔离历史制度与当期财报，防止跨期幻觉</td>
+          </tr>
+          <tr>
+            <td><code>doc_type</code></td>
+            <td>区分 <code>financial_report</code>、<code>compliance_policy</code>、<code>financial_ledger</code></td>
+            <td>为后续多路召回与重排提供文档类型权重依据</td>
+          </tr>
+          <tr>
+            <td><code>chunk_id</code></td>
+            <td><code>sha256(source_file:chunk_index:content_hash)[:20]</code></td>
+            <td>配合 SQLite <code>INSERT OR REPLACE</code> 实现 100% 幂等重建</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码速览（<code>CapstoneKBInitializer</code>）</h2>
+    <div class="card">
+<pre><code>from zhishu_agent import CapstoneKBInitializer
+
+initializer = CapstoneKBInitializer(chunk_size=300, chunk_overlap=40)
+chunks, stats = initializer.build_and_persist(
+    input_dir="data/corpus",
+    json_path="artifacts/kb_index.json",
+    sqlite_path="artifacts/kb_index.sqlite",
+)
+
+hits = initializer.query_sqlite(
+    db_path="artifacts/kb_index.sqlite",
+    department="compliance",
+    fiscal_year="FY2026",
+)
+print(f"构建切片: {stats.total_chunks}, 合规制度命中: {len(hits)}")</code></pre>
+    </div>
+
+    <h2>四、课堂思考与自测</h2>
+    <div class="card">
+      <p><strong>思考题</strong>：为什么在 Capstone Day 1 我们先将切片结果持久化到 JSON 与 SQLite，而不是直接写入向量数据库？</p>
+      <details>
+        <summary>点击查看参考解析</summary>
+        <p>先落盘 JSON 快照与 SQLite 关系索引，可以在不消耗 Embedding API/GPU 成本的情况下，快速审计切片边界、验证 <code>department/fiscal_year/doc_type</code> 元数据提取准确率，并支持确定性单元测试。Day 60 只需遍历 SQLite 中的 <code>kb_chunks</code> 即可批量生成向量写入 Qdrant/Milvus，实现解析层与向量检索层的解耦。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
