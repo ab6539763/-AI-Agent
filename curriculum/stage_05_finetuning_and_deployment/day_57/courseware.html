@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 57 | 智枢企业级智能体平台 · Week 9 综合测验与 LLM 安全合规网关</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第五阶段：模型微调与私有化部署 · Day 57 | 版本 v0.5.0-day57</div>
+      <h1>Week 9 综合测验与大模型安全合规网关</h1>
+      <p>企业需求驱动（Issue #057）：构建内容安全过滤、PII 敏感信息脱敏、备案合规审计与租户成本硬熔断网关</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上生产前的最后一道安全防线）：</strong><br />
+      第九周我们完成了 LoRA/QLoRA 微调、数据集清洗、权重合并与量化、vLLM 高并发引擎与 Docker Compose 私有化编排。今天在 <strong>Day 57</strong>，我们聚焦企业级落地最关键的“红线工程”——<strong>安全、隐私、备案与成本控制</strong>，打造 <code>ComplianceGateway</code> 并完成 Week 9 综合能力评估。
+    </div>
+
+    <h2>一、LLM 安全与合规网关流水线</h2>
+    <div class="card">
+      <p>所有企业流量在进入私有化 vLLM 引擎前与返回用户前，均需经过统一网关的四重防线：<strong>配额熔断 → 双向内容安全 → 双向 PII 脱敏 → 无明文 PII 审计落盘</strong>。</p>
+      <div class="mermaid">
+        flowchart LR
+          REQ["用户请求 (Tenant + Prompt)"] --> QUOTA{"CostBudgetMonitor: 日配额与熔断"}
+          QUOTA -->|"已熔断"| BLOCK_Q["BLOCK_QUOTA 拒绝"]
+          QUOTA -->|"放行"| IN_MOD{"ContentModerationFilter: 输入审核"}
+          IN_MOD -->|"命中风险"| BLOCK_I["BLOCK_INPUT 拦截"]
+          IN_MOD -->|"通过"| IN_PII["PIIDesensitizer: 输入脱敏"]
+          IN_PII --> LLM["vLLM / 私有化大模型"]
+          LLM --> OUT_MOD{"ContentModerationFilter: 输出审核"}
+          OUT_MOD -->|"违规输出"| BLOCK_O["BLOCK_OUTPUT 拦截"]
+          OUT_MOD -->|"通过"| OUT_PII["PIIDesensitizer: 输出脱敏"]
+          OUT_PII --> RESP["安全响应返回前端"]
+          BLOCK_Q --> AUDIT["ComplianceAuditLogger: 无明文 PII 审计"]
+          BLOCK_I --> AUDIT
+          BLOCK_O --> AUDIT
+          OUT_PII --> AUDIT
+      </div>
+    </div>
+
+    <h2>二、四大核心网关组件规范</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>组件类</th>
+            <th>核心职责</th>
+            <th>关键工程要点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>ContentModerationFilter</code></td>
+            <td>输入/输出内容安全审核</td>
+            <td>支持提示词注入、网络攻击、数据窃取等风险分类与自定义敏感词扩展，输出 <code>LOW/MEDIUM/HIGH</code> 风险等级</td>
+          </tr>
+          <tr>
+            <td><code>PIIDesensitizer</code></td>
+            <td>个人敏感信息自动脱敏</td>
+            <td>按 <strong>18位身份证 → 16~19位银行卡 → 11位手机号 → 邮箱</strong> 顺序匹配，配合 <code>(?&lt;!\d)...(?!\d)</code> 边界防冲突</td>
+          </tr>
+          <tr>
+            <td><code>CostBudgetMonitor</code></td>
+            <td>租户日配额与硬熔断器</td>
+            <td>按千 Token 计费并隔离租户日预算，超额立即触发 Circuit Breaker 在推理前 Fail-Fast 拦截</td>
+          </tr>
+          <tr>
+            <td><code>ComplianceAuditLogger</code></td>
+            <td>备案合规审计日志</td>
+            <td>绑定 <code>filing_record_id</code> 与输入 SHA-256 摘要，强制二次脱敏后写入 JSONL，严禁留存明文 PII</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、Week 9 知识图谱与自测抽查</h2>
+    <div class="card">
+      <p>完整 10 道单选题 + 2 道编程实战题与参考答案请查阅 <a href="docs/weekly_quiz_and_answers.md" style="color: var(--accent);">weekly_quiz_and_answers.md</a>。</p>
+      <details>
+        <summary>自测抽查 1：为什么 PII 脱敏必须先匹配 18 位身份证和银行卡，再匹配 11 位手机号？</summary>
+        <p>18 位身份证号与 16~19 位银行卡号内部往往包含以 <code>13x~19x</code> 开头的连续 11 位数字子串。若先匹配手机号，会导致长证件号被局部截断替换；通过“长模式优先 + 前后非数字负向环视 <code>(?&lt;!\d)...(?!\d)</code>”可彻底避免误匹配。</p>
+      </details>
+      <details>
+        <summary>自测抽查 2：企业大模型审计日志如何同时满足“监管可追溯”与“个人隐私保护”？</summary>
+        <p>采用 <strong>输入原文 SHA-256 哈希摘要 + 脱敏后文本预览 + 算法备案编号（<code>filing_record_id</code>）</strong> 的组合结构：既能证明请求发生时间与处置动作，又确保磁盘日志中不存在任何明文身份证、手机号或银行卡号。</p>
+      </details>
+      <details>
+        <summary>点击查看：Day 57 校验与运行命令</summary>
+        <pre><code>.venv/bin/python project_iterations/day_57/main.py
+.venv/bin/python scripts/verify_day.py --nb curriculum/stage_05_finetuning_and_deployment/day_57/notebook.ipynb --iter project_iterations/day_57</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
