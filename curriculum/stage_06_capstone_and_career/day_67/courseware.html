@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 67 | 智枢企业级智能体平台 · 面试专题（一）：技术八股与模拟笔试</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --rose: #fb7185;
+      --indigo: #818cf8;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0284c7 0%, #4f46e5 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.5);
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 22px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .tag {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: rgba(56, 189, 248, 0.15);
+      color: var(--accent);
+      margin-right: 6px;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+    .interactive-box select, .interactive-box textarea {
+      width: 100%;
+      box-sizing: border-box;
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin: 8px 0 14px;
+      font-family: inherit;
+      font-size: 14px;
+    }
+    .btn {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-right: 8px;
+    }
+    .btn-secondary {
+      background: #334155;
+      color: var(--text);
+    }
+    .btn:hover { opacity: 0.9; }
+    .pill {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pill-pass { background: rgba(52, 211, 153, 0.2); color: var(--green); }
+    .pill-warn { background: rgba(251, 191, 36, 0.2); color: var(--amber); }
+    .pill-fail { background: rgba(251, 113, 133, 0.2); color: var(--rose); }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">Stage 06 · 综合实战与求职冲刺 · v1.0.0-day67</div>
+      <h1>Day 67：面试专题（一）—— 技术八股与模拟笔试</h1>
+      <p style="margin:0; opacity:0.92;">
+        星辰数科 · 智枢企业级智能体平台（ZhiShu-Agent）｜ PM 林晓 · Tech Lead 张工 · Engineer 陈默 · QA 李婷 · DevOps 赵磊
+      </p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白：</strong>
+      简历过关后，技术笔试与一面/二面会直击你的底层原理与工程取舍功底。今天我们用工程化方式打造
+      <code>zhishu_agent/interview_bank.py</code>：内置 20 道覆盖 <strong>Transformer / RAG / Agent / Python / Engineering</strong>
+      五大维度的企业级高频八股题库，并通过要点覆盖率评分与薄弱维度诊断，帮你精准查漏补缺！
+    </div>
+
+    <h2>1. 需求背景与架构设计（Issue #067）</h2>
+    <div class="card">
+      <p>
+        Tech Lead 张工在组内评审中指出：“面试八股不是死记硬背，而是考察候选人是否真正理解<strong>原理 + 瓶颈 + 工程权衡</strong>。”
+        因此，<code>interview_bank.py</code> 将每道题拆解为带权重的 <code>KeyPoint</code>（主描述 + 同义关键词簇），通过
+        <code>ExamSession</code> 完成均衡组卷、自动判分、薄弱维度识别与靶向学习计划生成。
+      </p>
+      <div class="mermaid">
+flowchart LR
+    Q["20 题高频题库<br/>5 大核心维度"] --> S["ExamSession.select_questions()<br/>跨维度均衡抽题"]
+    S --> A["候选人作答 submit_answer()"]
+    A --> G["grade_answer()<br/>空答拦截 + 加权要点匹配"]
+    G --> R["AnswerGradeResult<br/>得分 / 覆盖率 / 缺失要点"]
+    R --> F["finish_exam(weak_threshold=70)"]
+    F --> P["ExamReport<br/>薄弱维度诊断 & 复习计划"]
+      </div>
+    </div>
+
+    <h2>2. 五大核心技术维度速览</h2>
+    <div class="grid-2">
+      <div class="card">
+        <h3>1. Transformer 与推理优化</h3>
+        <span class="tag">Attention</span><span class="tag">KV Cache</span><span class="tag">RoPE</span>
+        <p>重点掌握：$\sqrt{d_k}$ 方差缩放、KV Cache 从 Compute-Bound 到 Memory-Bound 的演进、PagedAttention、RoPE 外推与 Pre-LN 稳定性。</p>
+      </div>
+      <div class="card">
+        <h3>2. RAG 检索与定量评估</h3>
+        <span class="tag">BM25+RRF</span><span class="tag">Rerank</span><span class="tag">RAGAS</span>
+        <p>重点掌握：混合检索与 RRF 免归一化融合、Bi-Encoder 粗排 + Cross-Encoder 精排取舍、RAGAS 四大指标与 Chunking 边界。</p>
+      </div>
+      <div class="card">
+        <h3>3. Agent 架构与 Tool Use</h3>
+        <span class="tag">ReAct</span><span class="tag">HITL</span><span class="tag">MCP</span>
+        <p>重点掌握：ReAct vs Plan-and-Execute、Pydantic 参数契约与防死循环熔断、HITL 异步状态机挂起恢复、MCP 协议价值。</p>
+      </div>
+      <div class="card">
+        <h3>4. Python 异步与工程安全</h3>
+        <span class="tag">asyncio</span><span class="tag">SSE</span><span class="tag">Guardrails</span>
+        <p>重点掌握：FastAPI 同步阻塞陷阱与 <code>to_thread</code>、SSE vs WebSocket、Pydantic v2、GIL、Prompt 注入防御与 Mock CI 测试。</p>
+      </div>
+    </div>
+
+    <h2>3. 互动演练：前端实时模拟笔试自测台</h2>
+    <div class="card interactive-box">
+      <p style="margin-top:0; color:var(--muted);">
+        选择一道高频真题并输入你的口述/笔试作答，点击「立即评分」即可体验与后端 <code>grade_answer()</code> 一致的要点覆盖率诊断：
+      </p>
+      <label for="qSelect"><strong>选择测试题目：</strong></label>
+      <select id="qSelect" onchange="resetQuizResult()">
+        <option value="0">[Transformer] 为什么 Self-Attention 在计算点积后要除以 sqrt(d_k)？</option>
+        <option value="1">[RAG] 为什么企业级 RAG 常采用 BM25 + Dense Vector 混合检索，并用 RRF 进行融合？</option>
+        <option value="2">[Agent] 企业级 Agent 如何实现 Human-in-the-Loop（HITL）的挂起与断点恢复？</option>
+        <option value="3">[Python] 在 FastAPI 异步接口中调用同步阻塞库会有什么后果？如何解决？</option>
+        <option value="4">[Engineering] 如何系统性地防范 Prompt 注入与敏感信息（PII）泄露？</option>
+      </select>
+
+      <label for="ansInput"><strong>你的作答：</strong></label>
+      <textarea id="ansInput" rows="4" placeholder="请输入你的技术回答（支持中英文术语混写）..."></textarea>
+
+      <button class="btn" onclick="runGrade()">立即评分</button>
+      <button class="btn btn-secondary" onclick="fillDemoAnswer()">填入高分示例</button>
+
+      <div id="gradeOutput" style="margin-top:16px; display:none;" class="card"></div>
+    </div>
+
+    <h2>4. 核心评分逻辑与团队协作规范（MR !067）</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>角色</th><th>成员</th><th>Day 67 交付与评审要点</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>PM</td><td>林晓</td><td>定义 5 大岗位高频考察维度与 70 分薄弱项诊断阈值</td></tr>
+          <tr><td>Tech Lead</td><td>张工</td><td>Review <code>KeyPoint</code> 加权同义词匹配与跨维度均衡抽题策略</td></tr>
+          <tr><td>Engineer</td><td>陈默</td><td>实现 <code>interview_bank.py</code>（20 题内置题库 + 报告导出）</td></tr>
+          <tr><td>QA</td><td>李婷</td><td>编写 5 组 <code>pytest</code> 核心用例，覆盖空答边界与诊断排序</td></tr>
+          <tr><td>DevOps</td><td>赵磊</td><td>集成 <code>verify_day.py</code>，确保离线 Notebook 与单测 100% 绿灯</td></tr>
+        </tbody>
+      </table>
+      <details>
+        <summary>查看 CLI 演示命令与校验命令</summary>
+        <pre><code>.venv/bin/python project_iterations/day_67/main.py
+.venv/bin/python -m pytest project_iterations/day_67/tests -v
+.venv/bin/python scripts/verify_day.py --nb curriculum/stage_06_capstone_and_career/day_67/notebook.ipynb --iter project_iterations/day_67</code></pre>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+
+    const QUIZ_DATA = [
+      {
+        demo: "因为点积方差随 d_k 线性增大，数值过大时会让 Softmax 进入梯度饱和区导致梯度消失，除以 sqrt(d_k) 可将方差重新拉回 1，稳定反向传播。",
+        points: [
+          { label: "点积方差随维度 d_k 线性增大", kws: ["方差", "d_k", "线性增大", "variance"], w: 1.2 },
+          { label: "防止点积过大导致 Softmax 进入梯度饱和区", kws: ["softmax", "饱和", "梯度消失"], w: 1.5 },
+          { label: "缩放后维持方差为 1，稳定反向传播训练", kws: ["方差为1", "拉回 1", "稳定", "反向传播"], w: 1.0 }
+        ]
+      },
+      {
+        demo: "Dense 向量擅长语义匹配但对专有名词不敏感，BM25 擅长精确关键词匹配。两者用 RRF 基于排名倒数融合，无需对异构分数做归一化。",
+        points: [
+          { label: "Dense 向量对专有名词/代码精确匹配较弱", kws: ["语义", "专有名词", "精确", "dense", "向量"], w: 1.3 },
+          { label: "BM25 基于词频擅长精确关键词匹配", kws: ["bm25", "关键词", "精确匹配", "词频"], w: 1.3 },
+          { label: "RRF 基于排名倒数融合，无需分数归一化", kws: ["rrf", "倒数", "排名", "归一化"], w: 1.4 }
+        ]
+      },
+      {
+        demo: "在敏感工具调用前拦截并将上下文持久化为 pending 状态，释放当前协程；人工通过带幂等校验的回调接口流转为 approved 后异步恢复执行。",
+        points: [
+          { label: "拦截敏感工具并持久化上下文为 pending 状态", kws: ["拦截", "持久化", "pending", "状态机"], w: 1.4 },
+          { label: "释放当前线程/协程，通过回调幂等恢复执行", kws: ["释放", "异步", "回调", "恢复", "幂等"], w: 1.3 },
+          { label: "校验审批权限与状态流转防止越权重放", kws: ["权限", "approved", "rejected", "越权"], w: 1.2 }
+        ]
+      },
+      {
+        demo: "会阻塞 asyncio 事件循环导致整个 Worker 无法并发。应替换为 httpx/asyncpg 等异步库，或使用 asyncio.to_thread 将同步调用放到线程池。",
+        points: [
+          { label: "阻塞事件循环导致整个 Worker 无法并发", kws: ["事件循环", "event loop", "阻塞", "并发"], w: 1.5 },
+          { label: "替换为原生异步库（如 httpx、asyncpg）", kws: ["httpx", "asyncpg", "异步库"], w: 1.2 },
+          { label: "使用 asyncio.to_thread 或普通 def 路由", kws: ["to_thread", "run_in_executor", "线程池", "def"], w: 1.3 }
+        ]
+      },
+      {
+        demo: "隔离 System Prompt 与不可信用户输入边界，在网关护栏层对输入输出做 PII 脱敏拦截，工具执行坚持最小权限与 HITL 人工审批。",
+        points: [
+          { label: "System Prompt 与不可信用户输入边界隔离", kws: ["隔离", "system", "用户输入", "边界"], w: 1.3 },
+          { label: "网关/护栏层对输入输出进行 PII 脱敏", kws: ["pii", "脱敏", "护栏", "guardrail"], w: 1.4 },
+          { label: "最小权限原则与高风险 HITL 审批", kws: ["最小权限", "策略", "hitl", "审批"], w: 1.2 }
+        ]
+      }
+    ];
+
+    function resetQuizResult() {
+      document.getElementById("gradeOutput").style.display = "none";
+      document.getElementById("ansInput").value = "";
+    }
+
+    function fillDemoAnswer() {
+      const idx = parseInt(document.getElementById("qSelect").value, 10);
+      document.getElementById("ansInput").value = QUIZ_DATA[idx].demo;
+      runGrade();
+    }
+
+    function runGrade() {
+      const idx = parseInt(document.getElementById("qSelect").value, 10);
+      const ans = document.getElementById("ansInput").value.trim().toLowerCase();
+      const out = document.getElementById("gradeOutput");
+      out.style.display = "block";
+
+      if (!ans) {
+        out.innerHTML = `<span class="pill pill-fail">0.0 分 · 未作答</span>
+          <p style="margin:8px 0 0;">未检测到有效作答内容，请先输入你的核心思路再评分。</p>`;
+        return;
+      }
+
+      const item = QUIZ_DATA[idx];
+      let totalW = 0, hitW = 0;
+      const matched = [], missing = [];
+      for (const p of item.points) {
+        totalW += p.w;
+        const ok = p.kws.some(k => ans.includes(k));
+        if (ok) { hitW += p.w; matched.push(p.label); }
+        else { missing.push(p.label); }
+      }
+      const score = Math.round((hitW / totalW) * 1000) / 10;
+      const pillClass = score >= 85 ? "pill-pass" : (score >= 60 ? "pill-warn" : "pill-fail");
+      out.innerHTML = `
+        <span class="pill ${pillClass}">得分：${score} / 100</span>
+        <p style="margin:10px 0 4px;"><strong>✅ 命中要点：</strong>${matched.length ? matched.join("；") : "无"}</p>
+        <p style="margin:4px 0 0;"><strong>⚠️ 缺失要点：</strong>${missing.length ? missing.join("；") : "无（满分覆盖）"}</p>
+      `;
+    }
+  </script>
+</body>
+</html>
