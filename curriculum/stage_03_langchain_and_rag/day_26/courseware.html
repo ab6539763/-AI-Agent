@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 26 | 智枢企业级智能体平台 · LCEL 表达式语言与链式编排</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与 RAG 工程 · Day 26 | 版本 v0.3.0-day26</div>
+      <h1>LCEL 表达式语言与链式编排（<code>|</code>、Runnable、OutputParsers）</h1>
+      <p>企业需求驱动（Issue #026）：手写实现可组合管道引擎，掌握 Prompt | Model | Parser 与 3 阶段「翻译 → 润色 → 摘要」流水线</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（第三阶段开篇核心设计）：</strong><br />
+      为什么 LangChain 要推出 LCEL（LangChain Expression Language）？因为在真实企业项目中，智能体往往需要把<strong>提示词模板</strong>、<strong>大模型推理</strong>、<strong>结果解析</strong>以及<strong>多路并行检索</strong>像乐高积木一样自由拼装。今天我们不满足于“调包”，而是直接从零实现一套完整兼容 LCEL 语义的 <code>Runnable</code> 引擎，彻底吃透 <code>|</code> 管道运算符背后的 Python 魔术方法！
+    </div>
+
+    <h2>一、LCEL 核心数据流架构（<code>Prompt | Model | Parser</code>）</h2>
+    <div class="card">
+      <p>只要所有组件都继承自同一个 <code>Runnable</code> 协议，就能用 <code>|</code> 无缝衔接，形成标准单向数据流：</p>
+      <div class="mermaid">
+        flowchart LR
+          Input["输入字典<br/>{source_text}"] --> Prompt["PromptTemplate<br/>渲染提示词"]
+          Prompt -->|str| Model["MockChatModel<br/>大模型推理"]
+          Model -->|AIMessage| Parser["OutputParser<br/>Str / Json / Pydantic"]
+          Parser --> Output["最终输出<br/>str / dict / BaseModel"]
+      </div>
+    </div>
+
+    <h2>二、五大核心组件与协议拆解</h2>
+    <div class="card">
+      <h3>1. <code>Runnable</code> 抽象基类与 <code>__or__</code> / <code>__ror__</code></h3>
+      <table>
+        <thead>
+          <tr><th>核心类 / 方法</th><th>职责说明</th><th>工程亮点</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>Runnable</code></td><td>统一 <code>invoke</code> / <code>batch</code> / <code>stream</code></td><td>重载 <code>|</code> 自动构造 <code>RunnableSequence</code></td></tr>
+          <tr><td><code>RunnableLambda</code></td><td>包装普通函数或 <code>lambda</code></td><td>配合 <code>coerce_to_runnable</code> 实现零样板隐式转换</td></tr>
+          <tr><td><code>RunnablePassthrough</code></td><td>原样透传输入，支持 <code>.assign()</code></td><td>在保留上游字典字段的同时增量追加新字段</td></tr>
+          <tr><td><code>RunnableParallel</code></td><td>并行执行多分支字典映射</td><td>使用 <code>ThreadPoolExecutor</code> 并发调度各分支</td></tr>
+          <tr><td><code>OutputParser</code> 三剑客</td><td><code>Str</code> / <code>Json</code> / <code>Pydantic</code></td><td>自动剥离 <code>```json</code> 代码块并执行 Schema 强校验</td></tr>
+        </tbody>
+      </table>
+
+      <h3>2. 3 阶段「翻译 → 润色 → 摘要」LCEL 流水线代码</h3>
+      <pre><code>full_chain = (
+    RunnablePassthrough.assign(translated_text=translate_chain)
+    | RunnablePassthrough.assign(polished_text=polish_chain)
+    | RunnablePassthrough.assign(final_summary=summary_chain)
+)
+
+result = full_chain.invoke({"source_text": "ZhiShu Agent supports composable pipelines."})
+print(result["final_summary"])  # ArticleSummary(title=..., summary=..., keywords=[...])</code></pre>
+    </div>
+
+    <h2>三、本地运行与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 26 LCEL 演示脚本
+.venv/bin/python project_iterations/day_26/main.py
+
+# 2. 一键执行 Day 26 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_03_langchain_and_rag/day_26/notebook.ipynb \
+  --iter project_iterations/day_26</code></pre>
+      <details>
+        <summary>点击查看：为什么 <code>lambda x: ... | runnable</code> 也能直接用 <code>|</code>？</summary>
+        <p>Python 原生的函数对象没有定义 <code>__or__</code> 方法。当解释器计算 <code>func | runnable</code> 遇到 <code>TypeError</code> 时，会自动回退调用右侧对象的 <code>runnable.__ror__(func)</code>。我们在 <code>__ror__</code> 中调用 <code>coerce_to_runnable(func)</code> 将其包装为 <code>RunnableLambda</code>，从而实现无缝拼接！</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
