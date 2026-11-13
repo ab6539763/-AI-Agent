@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 24 | 智枢企业级智能体平台 · 全栈 Web ChatGPT 克隆版</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第二阶段收官：大模型与 Web 工程 · Day 24 | 版本 v0.2.0-day24</div>
+      <h1>FastAPI Part 2：SSE 流式输出 + CORS + SQLite 持久化 + Web ChatGPT</h1>
+      <p>企业需求驱动（Issue #024）：从零构建前后端全栈闭环，实现打字机逐字渲染、跨域放行与本地 SQLite 历史对话永久存储</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（第二阶段收官里程碑）：</strong><br />
+      恭喜你走到第二阶段的最后一天！之前我们的智能体只能躺在黑框命令行里运行，业务同事根本没法用。今天我们要把 <strong>FastAPI 后端</strong>、<strong>SQLite 持久化数据库</strong> 和 <strong>HTML5 <code>ReadableStream</code> 前端</strong> 串联起来，打造出属于自己的全栈 Web ChatGPT 克隆版！
+    </div>
+
+    <h2>一、全栈核心架构图（SSE + SQLite + CORS）</h2>
+    <div class="card">
+      <p>当用户在浏览器发送一条消息时，前后端与数据库之间会完成以下标准闭环：</p>
+      <div class="mermaid">
+        sequenceDiagram
+          actor User as 浏览器用户
+          participant FE as frontend/index.html (ReadableStream)
+          participant API as FastAPI (web_app.py)
+          participant DB as SQLite (ChatDatabase)
+
+          User->>FE: 输入问题并点击发送
+          FE->>API: POST /api/v1/chat/stream (fetch)
+          API->>DB: save_message(session_id, "user", msg)
+          loop 逐块 SSE 推送
+            API-->>FE: data: {"type": "delta", "content": "..."}
+            FE-->>User: 逐字追加渲染聊天气泡
+          end
+          API->>DB: save_message(session_id, "assistant", full_reply)
+          API-->>FE: data: {"type": "done", "message_id": ...}
+      </div>
+    </div>
+
+    <h2>二、三大核心工程模块拆解</h2>
+    <div class="card">
+      <h3>1. SQLite 对话持久化仓储（<code>ChatDatabase</code>）</h3>
+      <table>
+        <thead>
+          <tr><th>表名 / 方法</th><th>核心职责</th><th>关键工程细节</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>sessions</code> 表</td><td>存储会话 ID、标题、创建时间与更新时间</td><td><code>session_id TEXT PRIMARY KEY</code>，按 <code>updated_at DESC</code> 排序</td></tr>
+          <tr><td><code>messages</code> 表</td><td>存储每轮对话角色与内容</td><td>外键关联 <code>sessions</code> 并开启 <code>ON DELETE CASCADE</code></td></tr>
+          <tr><td><code>save_message / get_history</code></td><td>写入消息与按时间正序恢复上下文</td><td>支持 <code>limit</code> 截取最近 N 轮对话窗口</td></tr>
+        </tbody>
+      </table>
+
+      <h3>2. FastAPI SSE 流式接口与 CORS 中间件</h3>
+      <pre><code>@application.post("/api/v1/chat/stream")
+async def chat_stream(payload: ChatStreamRequest) -> StreamingResponse:
+    db.save_message(payload.session_id, "user", payload.message)
+    full_reply = _generate_assistant_reply(payload.message, history)
+
+    async def event_stream():
+        for chunk in _chunk_text(full_reply, chunk_size=4):
+            yield f"data: {json.dumps({'type': 'delta', 'content': chunk}, ensure_ascii=False)}\n\n"
+        msg_id = db.save_message(payload.session_id, "assistant", full_reply)
+        yield f"data: {json.dumps({'type': 'done', 'message_id': msg_id}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")</code></pre>
+
+      <h3>3. 前端为什么用 <code>fetch + ReadableStream</code> 而不用 <code>EventSource</code>？</h3>
+      <p>浏览器原生的 <code>EventSource</code> 只支持 <code>GET</code> 请求，无法在请求体（Body）中携带复杂的 JSON 对话历史或鉴权 Token。而使用 <code>fetch(..., {method: "POST"})</code> 配合 <code>response.body.getReader()</code> + <code>TextDecoder</code>，就能完美消费 <code>POST</code> 接口返回的 SSE 流！</p>
+    </div>
+
+    <h2>三、本地启动与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 启动 Day 24 全栈 Web ChatGPT 服务（浏览器访问 http://127.0.0.1:8000）
+.venv/bin/python project_iterations/day_24/main.py
+
+# 2. 一键执行 Day 24 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_02_llm_and_web/day_24/notebook.ipynb \
+  --iter project_iterations/day_24</code></pre>
+      <details>
+        <summary>点击查看：如果前端页面和 FastAPI 不在同一个端口启动怎么办？</summary>
+        <p>我们在 <code>web_app.py</code> 中已经配置了 <code>CORSMiddleware</code>，会自动在响应头中注入 <code>Access-Control-Allow-Origin: *</code> 并放行浏览器的 <code>OPTIONS</code> 预检请求，确保前后端分离开发也能正常接收流式数据。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
