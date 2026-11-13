@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 50 | 智枢企业级智能体平台 · Project 3 答辩、Stage 4 复盘与多智能体基准评测</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：智能体开发与多智能体编排 · Day 50 | 版本 v0.4.0-day50</div>
+      <h1>Project 3 答辩、Stage 4 复盘与多智能体基准评测套件</h1>
+      <p>企业需求驱动（Issue #050）：跨 ReAct、SQL Agent 与 Office Multi-Agent 场景的四维量化回归门禁与阶段验收</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（用量化指标为智能体阶段收官）：</strong><br />
+      从 Day 39 到 Day 49，我们构建了 ReAct 推理、Tool Calling、LangGraph 状态机、Supervisor 多智能体协同、MCP 协议、Workflow DSL 与安全护栏。今天在 <strong>Day 50</strong>，我们将所有能力收束为一套可自动化回归的 <strong>Stage 4 多智能体基准评测套件（<code>BenchmarkRunner</code>）</strong>，用<strong>任务成功率、延迟（Avg / P95 ms）、Token 美元成本、安全护栏通过率</strong>四大指标，完成 Project 3 正式答辩与 Stage 4 验收归档！
+    </div>
+
+    <h2>一、Stage 4 多智能体基准评测架构</h2>
+    <div class="card">
+      <p><code>BenchmarkRunner</code> 将安全护栏前置拦截与多场景执行解耦，确保安全红线用例在零 Token 消耗下快速拦截，同时对正常用例执行延迟、成本与输出 PII 脱敏校验。</p>
+      <div class="mermaid">
+        flowchart TD
+          SUITE["BenchmarkSuite (9 用例: ReAct / SQL Agent / Office Multi-Agent)"] --> GUARD_IN["BenchmarkGuardrail.check_input: 注入与高危 SQL 拦截"]
+          GUARD_IN -->|"命中红线"| BLOCKED(["快速拦截: blocked=True, tokens=0"])
+          GUARD_IN -->|"安全放行"| EXEC["Scenario Executor: react / sql_agent / office_multi_agent"]
+          EXEC --> GUARD_OUT["BenchmarkGuardrail.sanitize_output: PII 自动脱敏"]
+          BLOCKED --> REPORT["BenchmarkReport: 成功率 / Avg & P95 延迟 / Token 成本 / 护栏通过率"]
+          GUARD_OUT --> REPORT
+          REPORT --> GATE{"Release Gate 门禁校验"}
+      </div>
+    </div>
+
+    <h2>二、四大核心评测维度与门禁标准</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>评测维度</th>
+            <th>核心指标</th>
+            <th>Stage 4 验收门禁</th>
+            <th>工程意义</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>任务成功率</strong></td>
+            <td><code>overall_task_success_rate</code></td>
+            <td>&ge; 85.0%（实测 100.0%）</td>
+            <td>验证关键词命中、预算合规与安全拦截准确性</td>
+          </tr>
+          <tr>
+            <td><strong>安全护栏通过率</strong></td>
+            <td><code>overall_guardrail_pass_rate</code></td>
+            <td>== 100.0%（零容忍）</td>
+            <td>拦截 Prompt Injection 与删库 SQL，输出 PII 全脱敏</td>
+          </tr>
+          <tr>
+            <td><strong>端到端延迟</strong></td>
+            <td><code>avg_latency_ms</code> / <code>p95_latency_ms</code></td>
+            <td>Avg &le; 500 ms</td>
+            <td>监控多智能体编排与工具调用耗时退化</td>
+          </tr>
+          <tr>
+            <td><strong>Token 成本</strong></td>
+            <td><code>total_cost_usd</code></td>
+            <td>单用例 &le; \$0.05</td>
+            <td>精确计量 Prompt / Completion 费用，防止推理失控</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：运行 Stage 4 基准评测套件</h2>
+    <div class="card">
+      <pre><code>from zhishu_agent import BenchmarkRunner, build_default_benchmark_suite
+
+runner = BenchmarkRunner()
+suite = build_default_benchmark_suite()
+report = runner.run_suite(
+    suite,
+    min_success_rate=0.85,
+    min_guardrail_rate=1.0,
+    max_avg_latency_ms=500.0,
+)
+print(report.to_markdown())
+assert report.gate_passed is True</code></pre>
+    </div>
+
+    <h2>四、Project 3 答辩高频 Q&amp;A 演练</h2>
+    <div class="card">
+      <details>
+        <summary>Q1：为什么把 Prompt Injection 与高危 SQL 检查放在执行器之前？</summary>
+        <p>前置护栏可以在请求进入 LLM 或数据库之前直接阻断恶意指令，既消除越狱与删库风险，又避免浪费任何推理 Token（实测拦截用例 <code>total_tokens = 0</code>）。</p>
+      </details>
+      <details>
+        <summary>Q2：如何将离线基准套件平滑接入真实大模型或生产环境？</summary>
+        <p>通过 <code>BenchmarkRunner.register_executor(scenario, custom_fn)</code> 即可将 ReAct、SQL Agent 或 Office Multi-Agent 的离线仿真器替换为真实 LangGraph / MCP 执行器，评测指标与发布门禁逻辑完全复用。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
