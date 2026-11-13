@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 55 | 智枢企业级智能体平台 · 本地私有化推理服务（Ollama / vLLM 与吞吐压测）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第五阶段：模型微调与私有化部署 · Day 55 | 版本 v0.5.0-day55</div>
+      <h1>本地私有化推理服务：Ollama / vLLM OpenAI 兼容网关与吞吐压测</h1>
+      <p>企业需求驱动（Issue #055）：构建统一 OpenAI 协议推理网关，实现开发（Ollama）到生产（vLLM）的零代码切换与并发压测验收</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“单机能跑”到“高并发生产上线”）：</strong><br />
+      模型量化完成后，真正的生产考验在于高并发推理调度！今天在 <strong>Day 55</strong>，我们响应 DevOps 赵磊发起的 <strong>Issue #055</strong>，构建基于 <code>httpx</code>（支持 <code>MockTransport</code> 离线仿真）的 <code>OpenAICompatibleGateway</code>，并通过 <code>ThroughputBenchmarker</code> 实测对比 Ollama 静态批处理与 vLLM <strong>PagedAttention + Continuous Batching</strong> 在不同并发下的 TTFT、TPS 与 P95 延迟表现。
+    </div>
+
+    <h2>一、私有化推理网关与双引擎切换架构</h2>
+    <div class="card">
+      <p>通过 <strong>OpenAI 兼容协议（<code>/v1/chat/completions</code>）</strong> 对上层智能体屏蔽底层推理引擎差异，实现“本地 Ollama 开发调试 → 生产 vLLM 高并发集群”的零代码热切换：</p>
+      <div class="mermaid">
+        flowchart LR
+          APP["智枢智能体应用层 (Agent / RAG / Workflow)"] -->|"标准 OpenAI ChatCompletions 请求"| GW["OpenAICompatibleGateway (httpx + MockTransport)"]
+          GW -->|"环境切换: 本地开发 / CPU / Mac"| OLLAMA["Ollama 推理服务 (:11434/v1) · GGUF / 静态 KV 槽位"]
+          GW -->|"环境切换: 生产 GPU 集群"| VLLM["vLLM 推理服务 (:8000/v1) · AWQ / PagedAttention + Continuous Batching"]
+          OLLAMA --> BENCH["ThroughputBenchmarker (TTFT / TPS / P95 压测门禁)"]
+          VLLM --> BENCH
+      </div>
+    </div>
+
+    <h2>二、Ollama vs vLLM 核心架构差异</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>对比维度</th>
+            <th>Ollama（基于 llama.cpp）</th>
+            <th>vLLM（生产级 GPU 推理引擎）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>典型定位</strong></td>
+            <td>本地开发、个人 Mac/PC、低并发内网工具</td>
+            <td>企业级多租户高并发 GPU API 服务集群</td>
+          </tr>
+          <tr>
+            <td><strong>KV Cache 管理</strong></td>
+            <td>静态连续内存预分配，长短请求混跑存在显存碎片</td>
+            <td><strong>PagedAttention</strong> 分页动态分配，显存利用率 &gt; 96%</td>
+          </tr>
+          <tr>
+            <td><strong>批处理调度</strong></td>
+            <td>固定并行槽位（<code>OLLAMA_NUM_PARALLEL</code>），超限排队阻塞</td>
+            <td><strong>Continuous Batching</strong> 迭代级调度，请求完成即释放并插队</td>
+          </tr>
+          <tr>
+            <td><strong>高并发扩展性</strong></td>
+            <td>并发超过槽位后 TTFT 急剧恶化，总 TPS 很快触顶</td>
+            <td>随并发增加系统总 TPS 近似线性扩展，P95 延迟平滑可控</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码模式：OpenAI 兼容网关热切换</h2>
+    <div class="card">
+      <pre><code>from zhishu_agent import InferenceBackendConfig, OpenAICompatibleGateway
+
+# 1. 默认接入本地 Ollama
+with OpenAICompatibleGateway(InferenceBackendConfig.ollama_default()) as gw:
+    res_dev = gw.chat_completions([{"role": "user", "content": "生成只读 SQL 查询"}])
+
+    # 2. 一键热切换至生产 vLLM，上层业务调用签名完全不变
+    gw.switch_backend(InferenceBackendConfig.vllm_default())
+    res_prod = gw.chat_completions([{"role": "user", "content": "生成只读 SQL 查询"}])</code></pre>
+    </div>
+
+    <h2>四、课后思考与自测</h2>
+    <div class="card">
+      <details>
+        <summary>点击查看：为什么并发压测同时关注 TTFT 与 System TPS？</summary>
+        <p><strong>TTFT（首字延迟）</strong>受 Prefill 算力与队列等待影响，决定实时流式对话用户的“响应体感”；<strong>System TPS（系统总吞吐）</strong>受 Decode 显存带宽与 Batch Size 影响，决定单张 GPU 每秒能服务多少并发用户的算力成本。</p>
+      </details>
+      <details>
+        <summary>点击查看：运行验证命令</summary>
+        <pre><code>.venv/bin/python project_iterations/day_55/main.py
+.venv/bin/python scripts/verify_day.py --nb curriculum/stage_05_finetuning_and_deployment/day_55/notebook.ipynb --iter project_iterations/day_55</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
