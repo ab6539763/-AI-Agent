@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 27 | 智枢企业级智能体平台 · 多会话记忆机制与 SQLite 隔离</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与 RAG 知识库 · Day 27 | 版本 v0.3.0-day27</div>
+      <h1>Memory 记忆机制：滑动窗口、摘要压缩与 SQLite 多会话隔离</h1>
+      <p>企业需求驱动（Issue #027）：告别大模型“金鱼脑”与多租户串台事故，构建可持久化、可扩展的企业级记忆引擎</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（企业痛点导入）：</strong><br />
+      大模型本身是<strong>无状态（Stateless）</strong>的——每次 API 调用它都不记得上一秒说过什么。为了实现多轮对话，我们必须由应用层维护历史消息。但如果直接把所有历史塞进 Prompt，很快就会触发上下文长度上限与高昂的 Token 账单；如果多个部门共用一个内存列表，更会发生严重的<strong>数据串台泄密</strong>。今天我们就用 <code>WindowMemory</code>、<code>SummaryMemory</code> 和 <code>SQLiteChatMessageHistory</code> 彻底解决这三大难题！
+    </div>
+
+    <h2>一、多会话记忆隔离与策略路由架构</h2>
+    <div class="card">
+      <p>通过 <code>RunnableWithMessageHistory</code>，每次调用都会根据 <code>session_id</code> 自动隔离加载历史、应用记忆压缩策略，并在生成回复后自动落库：</p>
+      <div class="mermaid">
+        sequenceDiagram
+          actor UserA as 租户 A (tenant-fin)
+          participant Wrapper as RunnableWithMessageHistory
+          participant Strategy as Window / Summary Memory
+          participant DB as SQLiteChatMessageHistory
+          participant Chain as 业务问答链
+
+          UserA->>Wrapper: invoke(input, config={"configurable": {"session_id": "tenant-fin"}})
+          Wrapper->>DB: 按 session_id="tenant-fin" 读取历史
+          DB-->>Wrapper: 仅返回租户 A 的消息列表
+          Wrapper->>Strategy: 裁剪窗口或生成早期摘要
+          Strategy-->>Wrapper: 精简后的 context_messages
+          Wrapper->>Chain: 调用 runnable({"input": ..., "history": context_messages})
+          Chain-->>Wrapper: 返回 ai_reply
+          Wrapper->>DB: 写入 user 与 assistant 消息
+          Wrapper-->>UserA: 返回最终回复
+      </div>
+    </div>
+
+    <h2>二、三大核心记忆策略对比</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>策略 / 存储组件</th>
+            <th>核心机制</th>
+            <th>Token 成本</th>
+            <th>适用企业场景</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>InMemoryChatMessageHistory</code></td>
+            <td>进程内存列表存储</td>
+            <td>随轮次线性增长</td>
+            <td>本地开发、单元测试、一次性脚本</td>
+          </tr>
+          <tr>
+            <td><code>SQLiteChatMessageHistory</code></td>
+            <td>SQLite 落盘 + <code>session_id</code> 索引隔离</td>
+            <td>持久化底层仓储</td>
+            <td>多租户 Web 服务、进程重启恢复</td>
+          </tr>
+          <tr>
+            <td><code>WindowMemory(k)</code></td>
+            <td>保留 System Prompt + 最近 <code>k</code> 轮（<code>2k</code> 条）</td>
+            <td>固定可控上限</td>
+            <td>高频短对话、客服问答、工具调用</td>
+          </tr>
+          <tr>
+            <td><code>SummaryMemory</code></td>
+            <td>近期原样保留 + 早期历史压缩为摘要</td>
+            <td>低且可保留长程事实</td>
+            <td>长周期项目顾问、复杂需求梳理</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：`RunnableWithMessageHistory`</h2>
+    <div class="card">
+      <pre><code>from pathlib import Path
+from zhishu_agent.memory import (
+    RunnableWithMessageHistory,
+    SQLiteChatMessageHistory,
+    WindowMemory,
+)
+
+db_path = Path("zhishu_memory.db")
+chain = RunnableWithMessageHistory(
+    runnable=lambda payload: f"[{payload['session_id']}] 上下文 {len(payload['history'])} 条 -> {payload['input']}",
+    get_session_history=lambda sid: SQLiteChatMessageHistory(session_id=sid, db_path=db_path),
+    memory_strategy=WindowMemory(k=2, keep_system=True),
+)
+
+reply = chain.invoke("差旅住宿标准是多少？", config={"configurable": {"session_id": "tenant-fin"}})
+print(reply)</code></pre>
+    </div>
+
+    <h2>四、课堂自测与思考</h2>
+    <div class="card">
+      <h3>思考题：为什么 <code>WindowMemory</code> 不能直接对全部消息做 <code>messages[-2*k:]</code>？</h3>
+      <details>
+        <summary>点击查看参考解析</summary>
+        <p>
+          因为第 0 条消息通常是 <code>system</code> 角色的系统提示词（System Prompt），定义了智能体的身份、合规红线与输出格式。如果直接从末尾切片，系统提示词会在第 <code>k+1</code> 轮被挤出上下文窗口，导致智能体失忆或越权。因此必须先分离 <code>system</code> 消息，仅对用户/助手对话做滑动窗口裁剪。
+        </p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
