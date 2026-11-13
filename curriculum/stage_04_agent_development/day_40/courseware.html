@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 40 | 智枢企业级智能体平台 · LangChain Agent & @tool 生态</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：Agent 智能体开发 · Day 40 | 版本 v0.4.0-day40</div>
+      <h1>LangChain Agent &amp; <code>@tool</code> 生态与安全沙箱架构</h1>
+      <p>企业需求驱动（Issue #040）：实现 <code>@tool</code> 装饰器、<code>StructuredTool</code>、<code>ToolCallingAgent</code> 与 <code>AgentExecutor</code>，构建零越权风险的安全工具执行闭环</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（第四阶段启航）：</strong><br />
+      欢迎来到 Stage 4！如果说 RAG 让大模型“博闻强记”，那么 <strong>Tool Calling（工具调用）</strong> 则让智能体真正具备“动手解决现实问题”的能力。今天我们不仅要揭开 <code>@tool</code> 如何自动把 Python 函数变成 JSON Schema 的底层魔法，还要为智枢平台筑起三道安全防线：<strong>AST 白名单数学求值</strong>、<strong>沙箱路径隔离</strong> 与 <strong><code>intermediate_steps</code> 全链路审计</strong>。
+    </div>
+
+    <h2>一、Tool-Calling AgentExecutor 核心时序</h2>
+    <div class="card">
+      <p><code>AgentExecutor</code> 负责驱动 <code>ToolCallingAgent</code> 在 <code>max_iterations</code> 预算内执行 <code>Plan → Act → Observe</code> 循环，并将每一步的 <code>(AgentAction, observation)</code> 忠实记录在 <code>intermediate_steps</code> 中：</p>
+      <div class="mermaid">
+        sequenceDiagram
+          autonumber
+          actor User as 企业用户
+          participant Exec as AgentExecutor
+          participant Agent as ToolCallingAgent
+          participant LLM as LLM / Mock规划器
+          participant Tool as StructuredTool (沙箱)
+          User->>Exec: invoke({"input": "计算 (128+72)*3/4 并写入 calc_result.txt"})
+          loop 最多 max_iterations 轮
+            Exec->>Agent: plan(intermediate_steps, user_input)
+            Agent->>LLM: 发送 messages + tool_schemas
+            alt 调用工具
+              LLM-->>Agent: tool_calls: [{name, arguments}]
+              Agent-->>Exec: AgentAction(tool, tool_input)
+              Exec->>Tool: invoke(tool_input)
+              Tool-->>Exec: observation (结果或 Error)
+              Exec->>Exec: 追加至 intermediate_steps
+            else 推理完成
+              LLM-->>Agent: 最终回答
+              Agent-->>Exec: AgentFinish(output)
+              Exec-->>User: {"output": ..., "intermediate_steps": [...]}
+            end
+          end
+      </div>
+    </div>
+
+    <h2>二、<code>@tool</code> 装饰器与 <code>StructuredTool</code> 自动 Schema 提取</h2>
+    <div class="card">
+      <p>通过 Python 标准库 <code>inspect.signature</code> 与 <code>typing.get_type_hints</code>，<code>@tool</code> 在装饰函数时自动完成三件事：</p>
+      <table>
+        <thead>
+          <tr>
+            <th>提取维度</th>
+            <th>Python 反射机制</th>
+            <th>生成的 OpenAI Tool Schema 字段</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>工具名称</td>
+            <td><code>func.__name__</code> 或 <code>@tool("custom")</code></td>
+            <td><code>function.name</code></td>
+          </tr>
+          <tr>
+            <td>工具与参数描述</td>
+            <td><code>inspect.getdoc(func)</code> + <code>Args:</code> 正则解析</td>
+            <td><code>function.description</code> &amp; <code>properties[k].description</code></td>
+          </tr>
+          <tr>
+            <td>参数类型与必填项</td>
+            <td><code>get_type_hints()</code> + <code>Parameter.empty</code></td>
+            <td><code>parameters.properties</code> &amp; <code>parameters.required</code></td>
+          </tr>
+        </tbody>
+      </table>
+      <pre><code>@tool
+def query_asset(asset_id: str, include_history: bool = False) -> dict:
+    """查询企业 IT 资产台账信息.
+
+    Args:
+        asset_id: 资产唯一编号。
+        include_history: 是否返回历史变更记录。
+    """
+    return {"asset_id": asset_id, "include_history": include_history}</code></pre>
+    </div>
+
+    <h2>三、企业级三重安全沙箱工具集</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>沙箱工具</th>
+            <th>核心防御机制</th>
+            <th>拦截示例</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>safe_math_eval</code></td>
+            <td><code>ast.parse(..., mode="eval")</code> 白名单节点遍历，限制幂指数 &le; 1000</td>
+            <td><code>__import__('os')</code>、<code>eval()</code>、<code>open()</code> &rarr; <code>ValueError</code></td>
+          </tr>
+          <tr>
+            <td><code>read_file</code> / <code>write_file</code></td>
+            <td><code>Path.resolve()</code> + <code>target.is_relative_to(root_resolved)</code></td>
+            <td><code>../../etc/passwd</code>、<code>/etc/passwd</code> &rarr; <code>PermissionError</code></td>
+          </tr>
+          <tr>
+            <td><code>tavily_search</code></td>
+            <td>结构化 Mock 联网检索，返回确定性 <code>title/url/content</code></td>
+            <td>离线可复现、无外部网络波动</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>四、课后随堂思考与参考答案</h2>
+    <div class="card">
+      <p><strong>问题 1：</strong>为什么 <code>AgentExecutor</code> 在工具抛出 <code>PermissionError</code> 时，选择把异常文本作为 <code>observation</code> 写回 <code>intermediate_steps</code>，而不是直接让整个服务崩溃？</p>
+      <details>
+        <summary>点击展开参考答案</summary>
+        <p>将受控异常（如参数缺失、路径穿越拦截）转化为 <code>observation</code> 反馈给 <code>ToolCallingAgent</code>，既能阻止越权操作真正发生，又能让大模型在下一轮推理中感知错误原因并向用户输出合理解释或尝试修正参数，从而提升系统的鲁棒性与可观测性。</p>
+      </details>
+
+      <p><strong>问题 2：</strong>为什么 <code>@tool</code> 强制要求函数必须包含非空 Docstring？</p>
+      <details>
+        <summary>点击展开参考答案</summary>
+        <p>在 Function Calling 机制中，大模型并看不到工具的 Python 函数体源码，它只能依据 <code>name</code>、<code>description</code> 和 <code>parameters</code> Schema 来判断“何时该调用哪个工具”。缺失 Docstring 会导致模型无法理解工具语义，进而引发严重的参数幻觉或误调用。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
