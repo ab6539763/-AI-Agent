@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 11 | 智枢企业级智能体平台 · 文件操作与标准库（RAG 预处理基石）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 2 周 · Day 11 | 版本 v0.1.0-day11</div>
+      <h1>文件操作与标准库：智枢知识库文档扫描引擎（RAG 预处理基石）</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》—— 用 pathlib、re、csv、json 与 datetime 构建离线文档扫描与词频报告管线</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      各位同学好，我是 Tech Lead 张工。前几天我们把大模型适配器和消息对象都封装好了，今天产品经理林晓扔过来一个新的现实难题：<strong>准备做 RAG 企业知识库之前，客户发来了一个塞满几百个文件（`.md`、`.txt`、`.py`、`.json` 混杂）的目录</strong>。在写一行向量检索代码之前，我们必须先用 Python 标准库把这批文档“摸清家底”——过滤有效文本、正则统计核心业务词频、记录修改时间，并导出给运营和算法团队看懂的 CSV 报表与 JSON 元数据。今天我们将彻底告别脆弱的 <code>os.path</code> 拼接，掌握工程级标准库组合拳！
+    </div>
+
+    <h2>一、上午：Python 五大核心标准库协同全景</h2>
+    <div class="card">
+      <p>在企业级 RAG 数据清洗管线中，不依赖任何第三方库即可完成 90% 的文件探查与结构化归档：</p>
+      <table>
+        <thead>
+          <tr><th>标准库</th><th>核心 API</th><th>在智枢 RAG 预处理中的真实职责</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>pathlib</code></td><td><code>Path.rglob()</code> / <code>read_text()</code></td><td>跨平台路径拼接、递归过滤 <code>.txt/.md</code>、安全读写 UTF-8 文本</td></tr>
+          <tr><td><code>re</code></td><td><code>re.compile()</code> / <code>findall()</code> / <code>sub()</code></td><td>预编译关键词词频统计（支持全词边界 <code>\b</code>）、邮箱/手机号脱敏</td></tr>
+          <tr><td><code>datetime</code></td><td><code>datetime.fromtimestamp()</code> / <code>isoformat()</code></td><td>记录文件修改时间与扫描审计时间戳，统一输出 UTC ISO-8601</td></tr>
+          <tr><td><code>csv</code></td><td><code>csv.DictWriter(..., newline="")</code></td><td>生成运营/产品可直接用 Excel 打开的逐文件词频统计表</td></tr>
+          <tr><td><code>json</code></td><td><code>json.dumps(..., ensure_ascii=False)</code></td><td>导出带嵌套摘要的机器可读报告，供下游向量入库流水线消费</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>二、下午：企业需求 PRD 与系统架构设计</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #011（产品经理 林晓 提出）：</strong>实现 <code>DocScanner</code> 文档扫描器，扫描指定目录下的 <code>.txt</code> 和 <code>.md</code> 文件，使用正则统计指定关键词出现频次，并支持导出结构化 CSV 与 JSON 报告。</p>
+      <div class="mermaid">
+        flowchart TD
+          A["输入目录 Path + 关键词列表"] --> B{"目录与参数校验<br/>exists / is_dir / keywords"}
+          B -->|非法输入| E["抛出 FileNotFoundError /<br/>NotADirectoryError / ValueError"]
+          B -->|校验通过| C["pathlib.Path 扫描<br/>rglob('*') 过滤 .txt / .md"]
+          C --> D["re.compile 预编译正则<br/>逐文件统计词频与行数/字节数"]
+          D --> F["datetime 生成 UTC ISO 时间戳<br/>组装 DocumentRecord & ScanReport"]
+          F --> G["export_json()<br/>ensure_ascii=False, indent=2"]
+          F --> H["export_csv()<br/>csv.DictWriter + newline=''"]
+      </div>
+    </div>
+
+    <h2>三、下午实操：核心代码逐行解析</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_11/zhishu_agent/doc_scanner.py</code> 核心片段：</p>
+      <pre><code>from pathlib import Path
+from datetime import datetime, timezone
+import csv, json, re
+
+def scan_directory(root_dir: Path, keywords: list[str]) -&gt; dict:
+    # 1. 预编译正则，re.escape 防止关键词中的特殊符号（如 C++）报错
+    patterns = {
+        kw: re.compile(re.escape(kw), re.IGNORECASE)
+        for kw in keywords
+    }
+    records = []
+    # 2. pathlib 递归扫描并按相对路径排序，保证跨平台结果确定性
+    for path in sorted(root_dir.rglob("*")):
+        if not path.is_file() or path.suffix.lower() not in {".txt", ".md"}:
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        stat = path.stat()
+        counts = {kw: len(pat.findall(text)) for kw, pat in patterns.items()}
+        records.append({
+            "relative_path": path.relative_to(root_dir).as_posix(),
+            "size_bytes": stat.st_size,
+            "modified_at": datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+            "total_hits": sum(counts.values()),
+            "keyword_counts": counts,
+        })
+    return {
+        "scanned_at": datetime.now(timezone.utc).isoformat(),
+        "total_files": len(records),
+        "files": records,
+    }</code></pre>
+    </div>
+
+    <h2>四、避坑指南：工程实践中的 4 个高频陷阱</h2>
+    <div class="card">
+      <ul>
+        <li><strong>陷阱 1：CSV 写入出现空行</strong> —— 在 Windows 下用 <code>open(..., "w")</code> 写 CSV 必须加 <code>newline=""</code>，否则 <code>csv.DictWriter</code> 会每行多写一个空行。</li>
+        <li><strong>陷阱 2：中文 JSON 变成 <code>\uXXXX</code></strong> —— <code>json.dumps</code> 默认 <code>ensure_ascii=True</code>，务必显式传入 <code>ensure_ascii=False</code> 保留可读中文。</li>
+        <li><strong>陷阱 3：英文全词匹配误伤中文</strong> —— 仅当关键词首尾为 <code>\w</code>（字母/数字/下划线）时才加 <code>\b</code> 边界；对符号或特殊词先 <code>re.escape()</code>。</li>
+        <li><strong>陷阱 4：忘记创建父目录</strong> —— 导出报告前先调用 <code>out_path.parent.mkdir(parents=True, exist_ok=True)</code>，避免 <code>FileNotFoundError</code>。</li>
+      </ul>
+    </div>
+
+    <h2>五、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1：</strong>使用 <code>pathlib.Path</code> 为目录下的 <code>.txt/.md</code> 文件批量添加日期前缀重命名。</p>
+      <p><strong>作业 2：</strong>使用 <code>re.sub</code> 对文本中的中国大陆手机号（保留前 3 后 4）与邮箱（保留首字母与域名）进行脱敏。</p>
+      <p><strong>作业 3：</strong>编写函数将扫描记录同时导出为 <code>UTF-8</code> CSV 表格与带 UTC 时间戳的 JSON 报告。</p>
+      <details>
+        <summary>点击展开核心参考答案（完整版见 docs/homework_and_answers.md）</summary>
+        <pre><code>import re
+
+PHONE_RE = re.compile(r"(?&lt;!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)")
+EMAIL_RE = re.compile(r"\b([A-Za-z0-9])[A-Za-z0-9._%+-]*(@[A-Za-z0-9.-]+\.[A-Za-z]{2,})\b")
+
+def mask_sensitive_info(text: str) -&gt; str:
+    text = PHONE_RE.sub(r"\1****\2", text)
+    return EMAIL_RE.sub(r"\1***\2", text)
+
+print(mask_sensitive_info("联系 13812345678 或 chenmo@xingchen.ai"))</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
