@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 62 | 智枢企业级智能体平台 · Capstone 全栈前端 UI 与 FastAPI SSE 集成</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第六阶段：综合实战与求职冲刺 · Day 62 | 版本 v1.0.0-day62</div>
+      <h1>Capstone Dev Day 4：全栈前端 UI 与 FastAPI SSE 流式集成</h1>
+      <p>企业需求驱动（Issue #062）：打造「智枢企业财报与合规智能分析台」，打通 SSE 流式推理、混合 RAG 引用、HITL 人工审批与 SQLite 持久化</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从后端内核到可交互全栈产品）：</strong><br />
+      在 Capstone 前三天，我们已经夯实了混合检索（BM25 + 向量 RRF）、安全脱敏与 HITL 审批状态机。今天在 <strong>Day 62</strong>，我们把所有模块集成到 <code>FastAPI</code> + <code>SQLite</code> + 原生中文 Web UI 中，让业务人员可以在浏览器中实时观测智能体思考阶段、查看财报引用来源，并一键完成高风险动作的 Approve / Reject 人工审批闭环。
+    </div>
+
+    <h2>一、全栈 SSE 流式交互与 HITL 闭环架构</h2>
+    <div class="card">
+      <p>前端通过 <code>fetch</code> + <code>ReadableStream</code> 消费后端 <code>POST /api/v1/capstone/chat/stream</code> 推送的多事件 SSE 帧（<code>status</code> → <code>citations</code> → <code>token</code> → <code>hitl_required</code> → <code>done</code>），并在高风险挂起时联动 <code>POST /api/v1/capstone/approve</code> 完成状态闭环。</p>
+      <div class="mermaid">
+        flowchart LR
+          UI["frontend/index.html 分析台"] -->|"POST /api/v1/capstone/chat/stream"| API["FastAPI + CORSMiddleware"]
+          API --> SEC["PII 脱敏 & 注入检测"]
+          SEC -->|"安全通过"| RAG["HybridFinancialRAG (BM25 + 向量 RRF)"]
+          RAG -->|"SSE: citations"| UI
+          RAG --> GEN["流式生成 + HITL 风险识别"]
+          GEN -->|"SSE: token / hitl_required"| UI
+          UI -->|"POST /api/v1/capstone/approve"| HITL["resolve_hitl() 审批闭环"]
+          HITL --> DB[("SQLite: sessions / messages / approvals")]
+          GEN --> DB
+          UI -->|"GET /api/v1/capstone/history/{session_id}"| DB
+      </div>
+    </div>
+
+    <h2>二、核心接口与组件规范</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>接口 / 组件</th>
+            <th>职责定位</th>
+            <th>关键工程要点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET /</code> &amp; <code>GET /api/v1/health</code></td>
+            <td>前端托管与探活</td>
+            <td>直接返回中文分析台 <code>index.html</code>，健康检查返回 <code>v1.0.0-day62</code></td>
+          </tr>
+          <tr>
+            <td><code>POST /api/v1/capstone/chat/stream</code></td>
+            <td>SSE 流式对话主接口</td>
+            <td>返回 <code>text/event-stream</code>，设置 <code>X-Accel-Buffering: no</code> 防代理缓冲</td>
+          </tr>
+          <tr>
+            <td><code>POST /api/v1/capstone/approve</code></td>
+            <td>HITL 人工审批恢复</td>
+            <td>校验单据处于 <code>pending</code> 状态，重复审批返回 <code>409 Conflict</code></td>
+          </tr>
+          <tr>
+            <td><code>GET /api/v1/capstone/history/{session_id}</code></td>
+            <td>SQLite 会话审计回查</td>
+            <td>聚合返回脱敏后的对话消息、引用证据与审批记录，不存在则返回 <code>404</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、课后实战练习与自动化校验</h2>
+    <div class="card">
+      <p>完整 3 道全栈集成实战题与参考答案请查阅 <a href="docs/homework_and_answers.md" style="color: var(--accent);">homework_and_answers.md</a>。</p>
+      <details>
+        <summary>核心思考：为什么 POST SSE 接口在生产环境必须设置 X-Accel-Buffering: no？</summary>
+        <p>Nginx 等反向代理默认开启响应缓冲，会等待后端输出达到缓冲区阈值后才一次性转发给浏览器，导致 SSE 流式打字机效果退化为长时间卡顿。设置 <code>X-Accel-Buffering: no</code> 可强制代理逐帧透传。</p>
+      </details>
+      <details>
+        <summary>点击查看：Day 62 启动与双校验命令</summary>
+        <pre><code>.venv/bin/python project_iterations/day_62/main.py
+.venv/bin/python scripts/verify_day.py --nb curriculum/stage_06_capstone_and_career/day_62/notebook.ipynb --iter project_iterations/day_62</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
