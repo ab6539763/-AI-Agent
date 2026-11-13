@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 70 | 智枢企业级智能体平台 · 结业日：70天全景回顾、前沿趋势与职业发展路线图</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+      --purple: #a78bfa;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container { max-width: 1080px; margin: 0 auto; padding: 32px 24px 80px; }
+    .header {
+      background: linear-gradient(135deg, #0284c7 0%, #4f46e5 55%, #7c3aed 100%);
+      padding: 36px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+      box-shadow: 0 12px 32px rgba(15, 23, 42, 0.5);
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.45);
+      padding: 4px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      letter-spacing: 0.4px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 30px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 38px; }
+    h3 { color: var(--green); margin-top: 22px; }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 18px 22px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      gap: 16px;
+    }
+    .stage-pill {
+      display: inline-block;
+      font-size: 12px;
+      padding: 2px 10px;
+      border-radius: 999px;
+      background: rgba(52, 211, 153, 0.15);
+      color: var(--green);
+      border: 1px solid rgba(52, 211, 153, 0.35);
+      margin-bottom: 8px;
+    }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 18px; }
+    .btn {
+      background: #0f172a;
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s ease;
+    }
+    .btn:hover { border-color: var(--accent); color: var(--accent); }
+    .btn.active { background: var(--accent); color: #0f172a; border-color: var(--accent); font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+    th, td { border: 1px solid var(--border); padding: 10px 12px; text-align: left; }
+    th { background: rgba(15, 23, 42, 0.7); color: var(--accent); }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; background: rgba(2,6,23,0.6); padding: 2px 6px; border-radius: 4px; }
+    .cert-box {
+      background: linear-gradient(145deg, #0f172a, #1e293b);
+      border: 2px solid var(--amber);
+      border-radius: 14px;
+      padding: 24px;
+      font-family: "JetBrains Mono", Consolas, monospace;
+      white-space: pre-wrap;
+      font-size: 13.5px;
+      color: #fef3c7;
+    }
+    .team-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; font-size: 13px; color: #cbd5e1; }
+    .team-tag { background: rgba(15, 23, 42, 0.45); padding: 4px 10px; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">星辰数科 · 智枢企业级智能体平台 (ZhiShu-Agent) · Day 70 / v1.0.0-day70</div>
+      <h1>🎓 结业日：70天全景回顾、前沿趋势与职业发展路线图</h1>
+      <p style="margin: 6px 0 0; color: #e0f2fe;">
+        从 Python 工程底座到企业级 Multi-Agent + Hybrid RAG + HITL 全栈交付，正式发布 <code>v1.0.0</code> 里程碑
+      </p>
+      <div class="team-bar">
+        <span class="team-tag">PM 林晓（需求与验收）</span>
+        <span class="team-tag">Tech Lead 张工（架构评审）</span>
+        <span class="team-tag">Engineer 陈默（核心实现）</span>
+        <span class="team-tag">QA 李婷（自动化测试）</span>
+        <span class="team-tag">DevOps 赵磊（发布运维）</span>
+      </div>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白：</strong> 恭喜你走到了 70 天实战营的终点，也是职业跃迁的新起点！今天我们不仅要通过 <code>StageMilestone</code> 与 <code>validate_curriculum_span()</code> 对 70 天的六大阶段（<code>v0.1.0</code> → <code>v1.0.0</code>）做一次完整的工程盘点，还要借助 <code>TrendTracker</code> 洞察 2025–2026 年最核心的五大 AI Agent 前沿趋势，并为每一位学员生成专属结业证书与 30/60/90 天成长路线图。
+    </div>
+
+    <h2>1. 智枢平台 70 天演进架构图（v0.1.0 → v1.0.0）</h2>
+    <div class="card">
+      <div class="mermaid">
+flowchart LR
+    S1["Stage 1 (Day 01-14)<br/>v0.1.0 Python工程底座"] --> S2["Stage 2 (Day 15-24)<br/>v0.2.0 LLM API & SSE网关"]
+    S2 --> S3["Stage 3 (Day 25-38)<br/>v0.3.0 Hybrid RAG & Rerank"]
+    S3 --> S4["Stage 4 (Day 39-50)<br/>v0.4.0 Multi-Agent & HITL"]
+    S4 --> S5["Stage 5 (Day 51-57)<br/>v0.5.0 LoRA & vLLM云原生"]
+    S5 --> S6["Stage 6 (Day 58-70)<br/>v1.0.0 全栈交付 & 结业冲刺"]
+      </div>
+    </div>
+
+    <h2>2. 六大阶段里程碑全景（Day 01 – Day 70）</h2>
+    <div class="grid-3">
+      <div class="card">
+        <span class="stage-pill">Day 01-14 · v0.1.0</span>
+        <h3>第一阶段：Python 工程底座</h3>
+        <p>类型注解、Pydantic v2、<code>asyncio</code> 并发、<code>pytest</code> 规范与日志体系，奠定零外部依赖可测试骨架。</p>
+      </div>
+      <div class="card">
+        <span class="stage-pill">Day 15-24 · v0.2.0</span>
+        <h3>第二阶段：大模型 API 与 Web 全栈</h3>
+        <p>结构化输出、Function Calling、FastAPI + SSE 流式网关与 SQLite 会话持久化。</p>
+      </div>
+      <div class="card">
+        <span class="stage-pill">Day 25-38 · v0.3.0</span>
+        <h3>第三阶段：LangChain 与混合 RAG</h3>
+        <p>BM25 + Dense + RRF 倒数秩融合、Cross-Encoder Rerank 与 RAGAS 评测（Recall@5 达 92%）。</p>
+      </div>
+      <div class="card">
+        <span class="stage-pill">Day 39-50 · v0.4.0</span>
+        <h3>第四阶段：多智能体与 HITL 安全</h3>
+        <p>ReAct、LangGraph 状态机、Multi-Agent 路由、PII 脱敏与高风险操作 HITL 审批闭环。</p>
+      </div>
+      <div class="card">
+        <span class="stage-pill">Day 51-57 · v0.5.0</span>
+        <h3>第五阶段：微调、加速与云原生</h3>
+        <p>LoRA/QLoRA 微调、vLLM 高吞吐推理（3.2x）、Docker/K8s 部署与 Prometheus 可观测性。</p>
+      </div>
+      <div class="card">
+        <span class="stage-pill">Day 58-70 · v1.0.0</span>
+        <h3>第六阶段：综合实战与求职冲刺</h3>
+        <p>Capstone 端到端交付、压测演练、STAR 简历、面试实战与 30/60/90 天职业路线图。</p>
+      </div>
+    </div>
+
+    <h2>3. 2025–2026 前沿 AI Agent 趋势追踪器（交互筛选）</h2>
+    <div class="card">
+      <div class="controls" id="trend-filters">
+        <button class="btn active" onclick="filterTrends('all', this)">全部趋势 (5)</button>
+        <button class="btn" onclick="filterTrends('production', this)">已大规模生产 (Production)</button>
+        <button class="btn" onclick="filterTrends('emerging', this)">快速演进中 (Emerging)</button>
+        <button class="btn" onclick="filterTrends('experimental', this)">前沿探索中 (Experimental)</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>前沿方向</th>
+            <th>成熟度</th>
+            <th>核心技术栈</th>
+            <th>对智枢平台的演进影响</th>
+          </tr>
+        </thead>
+        <tbody id="trend-tbody">
+          <tr data-maturity="production">
+            <td><strong>推理增强模型 (o1 / DeepSeek-R1)</strong></td>
+            <td><code>production</code></td>
+            <td>Test-time Compute, Long CoT, PRM</td>
+            <td>Planner 引入快慢思考分层路由，复杂决策走推理模型提准。</td>
+          </tr>
+          <tr data-maturity="production">
+            <td><strong>MCP 与智能体互操作协议</strong></td>
+            <td><code>production</code></td>
+            <td>MCP, A2A Protocol, JSON-RPC 2.0</td>
+            <td>内部工具封装为标准 MCP Server，实现跨 IDE 与跨系统即插即用。</td>
+          </tr>
+          <tr data-maturity="emerging">
+            <td><strong>多模态与 GUI 操纵智能体</strong></td>
+            <td><code>emerging</code></td>
+            <td>Native VLM, Computer-Use, Browser-Use</td>
+            <td>支持财报图表理解与无 API 老旧系统安全自动化操作（绑定 HITL）。</td>
+          </tr>
+          <tr data-maturity="emerging">
+            <td><strong>实时语音与全双工智能体</strong></td>
+            <td><code>emerging</code></td>
+            <td>WebRTC, Realtime API, VAD</td>
+            <td>端到端语音延迟压降至 300–500ms，支持自然打断与会话恢复。</td>
+          </tr>
+          <tr data-maturity="experimental">
+            <td><strong>端侧与边缘智能体 (Edge AI)</strong></td>
+            <td><code>experimental</code></td>
+            <td>Qwen Small, GGUF/MLX, ONNX Runtime</td>
+            <td>端侧脱敏 + 云端深度推理混合部署，降低 60% 云端 Token 成本。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>4. 结业后 30 / 60 / 90 天职业发展路线图（岗位切换）</h2>
+    <div class="card">
+      <div class="controls" id="role-tabs">
+        <button class="btn active" onclick="showRoadmap('agent', this)">Agent Engineer</button>
+        <button class="btn" onclick="showRoadmap('rag', this)">RAG Engineer</button>
+        <button class="btn" onclick="showRoadmap('app', this)">AI Application Engineer</button>
+      </div>
+      <div id="roadmap-content"></div>
+    </div>
+
+    <h2>5. 智枢 70 天结业电子证书预览</h2>
+    <div class="cert-box">========================================================================
+                  星辰数科 · 智枢企业级智能体实战营 结业证书
+                  ZhiShu-Agent 70-Day Engineering Certificate
+========================================================================
+授予学员：陈默（及每一位坚持完赛的你）
+认证方向：Agent Engineer / RAG Engineer / AI Application Engineer
+完成进度：70/70 天（版本里程碑 v0.1.0 -> v1.0.0）
+颁发日期：2026-11-13
+签发团队：星辰数科教研与工程委员会（林晓 / 张工 / 陈默 / 李婷 / 赵磊）
+
+核心工程能力认证：
+- 完成 Day 01 ~ Day 70 全部 6 大阶段工程实战，交付智枢企业级智能体平台 v1.0.0
+- 掌握 Hybrid RAG（BM25+Dense+RRF+Rerank）、Multi-Agent、MCP 协议与 HITL 审批闭环
+- 通过全链路 pytest 自动化测试与 Notebook 端到端真实内核验证
+========================================================================</div>
+  </div>
+
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: 'dark' });
+
+    function filterTrends(maturity, btn) {
+      document.querySelectorAll('#trend-filters .btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('#trend-tbody tr').forEach(row => {
+        if (maturity === 'all' || row.dataset.maturity === maturity) {
+          row.style.display = '';
+        } else {
+          row.style.display = 'none';
+        }
+      });
+    }
+
+    const roadmaps = {
+      agent: `
+        <h3>🤖 Agent Engineer · 30/60/90 天进阶路线</h3>
+        <ul>
+          <li><strong>Day 1-30（巩固交付与求职突破）：</strong>将智枢工具集封装为标准 MCP Server；用推理模型（o1/R1）改造 Planner 快慢思考路由；完善 GitHub 作品集并完成 10 次目标岗位投递复盘。</li>
+          <li><strong>Day 31-60（前沿拓展与深度攻坚）：</strong>引入多模态 Computer-Use 能力；建立 Agent 评测基准集并接入 CI；输出 2 篇深度技术博客。</li>
+          <li><strong>Day 61-90（生产实战与影响力跃迁）：</strong>主导 1 个跨部门智能体项目从 0 到 1 上线与灰度观测；向开源 Agent 社区贡献 PR。</li>
+        </ul>`,
+      rag: `
+        <h3>📚 RAG Engineer · 30/60/90 天进阶路线</h3>
+        <ul>
+          <li><strong>Day 1-30（巩固交付与求职突破）：</strong>优化多模态财报表格版面解析与父子索引；补充 RAGAS 自动化回归流水线；沉淀 Recall@K 与 Faithfulness 实验报告。</li>
+          <li><strong>Day 31-60（前沿拓展与深度攻坚）：</strong>探索 GraphRAG 解决多跳推理；压测向量库千万级分片性能；实现租户级 ACL 权限过滤与 PII 检索前脱敏。</li>
+          <li><strong>Day 61-90（生产实战与影响力跃迁）：</strong>构建 Badcase 难例挖掘与 Reranker 微调数据飞轮；主导企业知识中台 P95 &lt; 200ms SLA 达标。</li>
+        </ul>`,
+      app: `
+        <h3>⚡ AI Application Engineer · 30/60/90 天进阶路线</h3>
+        <ul>
+          <li><strong>Day 1-30（巩固交付与求职突破）：</strong>打磨 FastAPI + SSE 断线重连与状态恢复；完善 Docker/K8s 部署与 Prometheus 看板；准备 15 分钟系统设计演讲。</li>
+          <li><strong>Day 31-60（前沿拓展与深度攻坚）：</strong>集成 Realtime 语音或端侧小模型；建设多供应商网关 Fallback、语义缓存与成本账单；完成 3 轮系统设计模拟面试。</li>
+          <li><strong>Day 61-90（生产实战与影响力跃迁）：</strong>主导高并发 AI 应用产品化落地与 A/B 测试闭环，向资深 AI 全栈架构师进阶。</li>
+        </ul>`
+    };
+
+    function showRoadmap(role, btn) {
+      document.querySelectorAll('#role-tabs .btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('roadmap-content').innerHTML = roadmaps[role];
+    }
+
+    showRoadmap('agent', document.querySelector('#role-tabs .btn'));
+  </script>
+</body>
+</html>
