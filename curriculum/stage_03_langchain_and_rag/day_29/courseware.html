@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 29 | 智枢企业级智能体平台 · 向量数据库与 Retriever 接口</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 29 | 版本 v0.3.0-day29</div>
+      <h1>向量数据库与 Retriever 接口：Chroma 兼容本地向量库</h1>
+      <p>企业需求驱动（Issue #029）：实现确定性本地向量化、元数据过滤、JSON 持久化与标准 <code>as_retriever()</code> 检索封装</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（RAG 检索核心底座）：</strong><br />
+      欢迎来到 Day 29！在 RAG（检索增强生成）架构中，文档切分只是第一步，真正决定“找得准、找得快、不越权”的核心组件是<strong>向量数据库（Vector Store）</strong>与<strong>检索器（Retriever）</strong>。今天我们将手写一个 Chroma 兼容的 <code>LocalVectorStore</code>，并掌握元数据预过滤、Top-K 召回与持久化落盘的工程实践！
+    </div>
+
+    <h2>一、ANN / HNSW 索引直觉与 Retriever 流水线</h2>
+    <div class="card">
+      <p>从文档入库到用户提问召回 Top-K 上下文，完整的数据流转如下：</p>
+      <div class="mermaid">
+        flowchart TD
+          A["Document + Metadata"] --> B["LocalEmbedding (Unigram/Bigram + L2 Norm)"]
+          B --> C["LocalVectorStore 写入索引"]
+          C --> D["JSON 持久化 save / load"]
+          Q["用户 Query"] --> QE["embed_query"]
+          QE --> MF{"Metadata Pre-filtering"}
+          MF -->|"生产级 ANN / HNSW"| HNSW["多层跳表近邻搜索 O(log N)"]
+          MF -->|"本地精确计算"| COS["Cosine Similarity 排序"]
+          HNSW --> TOPK["Top-K 截断"]
+          COS --> TOPK
+          TOPK --> RET["VectorStoreRetriever.invoke()"]
+      </div>
+    </div>
+
+    <h2>二、三大核心模块拆解</h2>
+    <div class="card">
+      <h3>1. 确定性向量化器（<code>LocalEmbedding</code>）</h3>
+      <table>
+        <thead>
+          <tr><th>设计要素</th><th>工程实现</th><th>核心优势</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>确定性哈希</td><td><code>hashlib.sha256</code> 替代内置 <code>hash()</code></td><td>不受 <code>PYTHONHASHSEED</code> 影响，重启结果完全一致</td></tr>
+          <tr><td>中英文分词</td><td>英文单词 + 中文 Unigram/Bigram</td><td>无需第三方分词库，支持中英文混合精确/语义匹配</td></tr>
+          <tr><td>L2 归一化</td><td>向量除以模长 <code>norm</code></td><td>点积即余弦相似度，范围严格落在 <code>[-1, 1]</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3>2. 向量存储与元数据过滤（<code>LocalVectorStore</code>）</h3>
+      <pre><code>store = LocalVectorStore(collection_name="zhishu_kb", persist_directory="./data")
+store.add_documents(docs)
+store.save()
+
+# 元数据预过滤 + 带分数检索
+results = store.similarity_search_with_score(
+    query="Redis 规范",
+    k=2,
+    filter_metadata={"department": "it", "year": {"$gte": 2025}},
+)</code></pre>
+
+      <h3>3. 标准检索器接口（<code>VectorStoreRetriever</code>）</h3>
+      <p>通过 <code>retriever = store.as_retriever(search_kwargs={"k": 3})</code> 将底层向量库抽象为统一的 <code>invoke(query)</code> 接口。上层 RAG 问答链无需关心底层是 Chroma、FAISS 还是 <code>LocalVectorStore</code>，实现“存储与编排解耦”。</p>
+    </div>
+
+    <h2>三、本地运行与自动化验收</h2>
+    <div class="card">
+      <pre><code># 1. 运行 Day 29 本地向量库演示脚本
+.venv/bin/python project_iterations/day_29/main.py
+
+# 2. 一键执行 Day 29 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_03_langchain_and_rag/day_29/notebook.ipynb \
+  --iter project_iterations/day_29</code></pre>
+      <details>
+        <summary>点击查看：为什么要用 Pre-filtering（先过滤再算 Top-K）？</summary>
+        <p>如果先取全库 Top-K 再做元数据过滤，一旦最相似的 K 条文档恰好属于无权限的部门，过滤后就会返回空结果。先过滤再排序（Pre-filtering）能确保在合法权限范围内稳定召回 Top-K 文档。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
