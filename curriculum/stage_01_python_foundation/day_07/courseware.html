@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 07 | 智枢企业级智能体平台 · 第 1 周复盘与企业通讯录综合实战</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 1 周收官日 · Day 07 | 版本 v0.1.0-day07</div>
+      <h1>第 1 周复盘与综合实战：企业通讯录 / Agent 联系人管理系统</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》Week 1 Capstone —— 串起 Python 核心语法、CRUD 增删改查、JSON 持久化与 pytest 自动化测试</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      各位同学，恭喜来到第 1 周的最后一天！前 6 天我们分别拆解了环境治理、字符串清洗、流程控制、列表/字典、JSON 序列化和异常处理。今天我们站在架构师视角把它们全部串联起来：为智枢平台交付第一个真正闭环的业务子系统——<strong>企业通讯录 / Agent 联系人管理系统</strong>（<code>zhishu_agent/contacts.py</code>）。在这里，每一个同事和每一个 AI Agent 都是一个标准化的字典实体，支持完整的 CRUD 与本地 JSON 持久化！
+    </div>
+
+    <h2>一、上午：第 1 周知识全景图与工程能力复盘</h2>
+    <div class="card">
+      <p>第 1 周的核心目标是从“写零散脚本”升级为“交付可测试、可持久化、有边界防御的模块化 Python 代码”。知识演进全景如下：</p>
+      <div class="mermaid">
+        flowchart LR
+          D1["Day 01-02<br/>环境治理与字符串清洗<br/>profile.py / strip / f-string"] --> D3["Day 03-04<br/>流程控制与数据结构<br/>if-else / for / list / dict"]
+          D3 --> D5["Day 05-06<br/>JSON 与文件异常防御<br/>json_parser.py / Path / try-except"]
+          D5 --> D7["Day 07 综合实战<br/>contacts.py<br/>CRUD + JSON持久化 + pytest"]
+      </div>
+
+      <table>
+        <thead>
+          <tr><th>模块/知识点</th><th>核心语法与标准库</th><th>在 Day 07 通讯录中的落地应用</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>数据建模</td><td><code>list[dict[str, Any]]</code></td><td>统一存储人类员工与 AI Agent 联系人记录</td></tr>
+          <tr><td>输入清洗与校验</td><td><code>strip()</code> / <code>lower()</code> / <code>ValueError</code></td><td>防空姓名、防重复录入、限制 <code>agent_type</code> 为 <code>human/agent</code></td></tr>
+          <tr><td>模糊检索与筛选</td><td>列表推导式 / <code>any()</code></td><td><code>find_contact</code> 多字段模糊匹配，<code>list_contacts</code> 组合筛选</td></tr>
+          <tr><td>局部更新</td><td>仅限位置参数 <code>/</code> + <code>**updates</code></td><td><code>update_contact(contacts, target_name, /, **updates)</code> 避免键名冲突</td></tr>
+          <tr><td>持久化存储</td><td><code>pathlib.Path</code> + <code>json.dump</code>/<code>load</code></td><td><code>ensure_ascii=False, indent=2</code> 保存可读中文通讯录</td></tr>
+          <tr><td>质量保障</td><td><code>pytest</code> + <code>tmp_path</code></td><td>9 个自动化测试用例覆盖正常路径与异常边界</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>二、下午实战：Contacts CRUD + JSON 持久化核心代码</h2>
+    <div class="card">
+      <h3>2.1 核心模块设计（<code>zhishu_agent/contacts.py</code>）</h3>
+      <p>在实际企业项目中，CRUD 接口必须遵循<strong>“先校验、再操作、显式抛异常”</strong>原则。以下核心代码可直接运行验证：</p>
+      <pre><code>import json
+from pathlib import Path
+from typing import Any
+
+VALID_AGENT_TYPES = {"human", "agent"}
+
+def add_contact(
+    contacts: list[dict[str, Any]],
+    name: str,
+    role: str,
+    department: str = "AI 研发部",
+    agent_type: str = "human",
+    skills: list[str] | None = None,
+) -> dict[str, Any]:
+    clean_name = name.strip()
+    clean_role = role.strip()
+    if not clean_name or not clean_role:
+        raise ValueError("姓名与岗位均不能为空")
+    if agent_type.lower() not in VALID_AGENT_TYPES:
+        raise ValueError(f"非法类型: {agent_type}")
+    if any(c["name"].lower() == clean_name.lower() for c in contacts):
+        raise ValueError(f"联系人已存在: {clean_name}")
+
+    contact = {
+        "name": clean_name,
+        "role": clean_role,
+        "department": department.strip() or "AI 研发部",
+        "agent_type": agent_type.lower(),
+        "skills": [s.strip() for s in (skills or []) if s.strip()],
+    }
+    contacts.append(contact)
+    return contact
+
+def save_contacts(filepath: Path | str, contacts: list[dict[str, Any]]) -> None:
+    target = Path(filepath)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8") as f:
+        json.dump(contacts, f, ensure_ascii=False, indent=2)</code></pre>
+
+      <h3>2.2 课堂要点笔记（Tech Lead 张工划重点）</h3>
+      <ul>
+        <li><strong>防坑 1（仅限位置参数 <code>/</code>）</strong>：<code>update_contact(contacts, target_name, /, **updates)</code> 允许调用方传入 <code>name="新名字"</code> 而不会触发 Python 参数重名报错。</li>
+        <li><strong>防坑 2（中文不乱码）</strong>：持久化 JSON 必须同时指定 <code>encoding="utf-8"</code> 与 <code>ensure_ascii=False</code>。</li>
+        <li><strong>防坑 3（返回副本）</strong>：<code>list_contacts</code> 返回新列表副本，防止外部直接 <code>.clear()</code> 破坏内部数据。</li>
+      </ul>
+    </div>
+
+    <h2>三、晚上验收：第 1 周随堂自测（可折叠查看答案）</h2>
+    <div class="card">
+      <h3>自测题 1：为什么 <code>save_contacts</code> 要先调用 <code>target.parent.mkdir(parents=True, exist_ok=True)</code>？</h3>
+      <details>
+        <summary>点击展开答案与解析</summary>
+        <p><strong>答案</strong>：Python 的 <code>open(filepath, "w")</code> 不会自动创建不存在的父目录，否则会直接抛出 <code>FileNotFoundError</code>。使用 <code>mkdir(parents=True, exist_ok=True)</code> 可以递归建好缺失目录并在目录已存在时安全跳过。</p>
+      </details>
+
+      <h3>自测题 2：在 <code>pytest</code> 中测试 <code>save_contacts</code> 和 <code>load_contacts</code> 时，应该把测试文件写在哪里？</h3>
+      <details>
+        <summary>点击展开答案与解析</summary>
+        <p><strong>答案</strong>：使用 pytest 内置的 <code>tmp_path</code> 夹具（例如 <code>tmp_path / "contacts.json"</code>）。它会自动为每个测试函数创建独立的临时目录，测试完成后自动清理，绝不污染项目源码仓库。</p>
+      </details>
+
+      <h3>自测题 3：如何一条命令运行 Day 07 的全部单元测试与 Notebook 校验？</h3>
+      <details>
+        <summary>点击展开答案与解析</summary>
+        <pre><code>.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_01_python_foundation/day_07/notebook.ipynb \
+  --iter project_iterations/day_07</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
