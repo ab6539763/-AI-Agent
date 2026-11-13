@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 34 | 智枢企业级智能体平台 · RAG 评估体系（Ragas 四大核心指标）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 34 | 版本 v0.3.0-day34</div>
+      <h1>RAG 评估体系：Ragas 四大核心指标与自动化质检</h1>
+      <p>企业需求驱动（Issue #034）：实现 Faithfulness、Answer Relevancy、Context Precision、Context Recall 与 <code>RAGEvaluator</code> 诊断流水线</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“能跑通”到“可量化”）：</strong><br />
+      欢迎来到 Day 34！在企业级 RAG 落地过程中，“感觉效果不错”是最危险的幻觉。今天我们引入业界标准的 <strong>Ragas 评估框架</strong>，把 RAG 拆解为“检索侧”与“生成侧”四大核心指标，让每一次切分优化、Prompt 调整和 Rerank 升级都有据可依！
+    </div>
+
+    <h2>一、Ragas 四维评估与诊断闭环流水线</h2>
+    <div class="card">
+      <p>Ragas 通过 <code>EvalSample(question, answer, contexts, ground_truth)</code> 将问题精准定位到生成侧或检索侧：</p>
+      <div class="mermaid">
+        flowchart TD
+          DS["EvalSample (Q, A, Contexts, GT)"] --> EVAL["RAGEvaluator.evaluate_dataset()"]
+          EVAL --> GEN["生成侧 Generation"]
+          EVAL --> RET["检索侧 Retrieval"]
+          GEN --> F["Faithfulness 忠实度 (防幻觉)"]
+          GEN --> AR["Answer Relevancy 相关性 (防跑题)"]
+          RET --> CP["Context Precision 精确率 (Precision@K 排序)"]
+          RET --> CR["Context Recall 召回率 (GT 事实覆盖)"]
+          F --> RPT["EvalReport 聚合报告 & 逐样本诊断"]
+          AR --> RPT
+          CP --> RPT
+          CR --> RPT
+      </div>
+    </div>
+
+    <h2>二、Ragas 四大核心指标拆解</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>指标名称</th>
+            <th>所属阶段</th>
+            <th>输入依赖</th>
+            <th>核心计算公式 / 物理意义</th>
+            <th>低分诊断与优化动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>Faithfulness</code></td>
+            <td>生成侧</td>
+            <td><code>answer</code>, <code>contexts</code></td>
+            <td>被上下文支撑的陈述数 / 回答总陈述数</td>
+            <td><code>hallucination_risk</code>：收紧 Prompt 约束、降低 Temperature</td>
+          </tr>
+          <tr>
+            <td><code>Answer Relevancy</code></td>
+            <td>生成侧</td>
+            <td><code>question</code>, <code>answer</code></td>
+            <td>提问与回答的语义相似度 + 核心词覆盖率</td>
+            <td><code>low_relevancy</code>：优化意图识别、禁止答非所问</td>
+          </tr>
+          <tr>
+            <td><code>Context Precision</code></td>
+            <td>检索侧</td>
+            <td><code>question</code>, <code>contexts</code>, <code>ground_truth</code></td>
+            <td>基于 <code>Precision@K</code> 衡量相关文档是否排在前列</td>
+            <td><code>retrieval_noise</code>：引入 Rerank 重排序、减小 K 值</td>
+          </tr>
+          <tr>
+            <td><code>Context Recall</code></td>
+            <td>检索侧</td>
+            <td><code>ground_truth</code>, <code>contexts</code></td>
+            <td>被上下文覆盖的标准答案事实数 / 标准答案总事实数</td>
+            <td><code>missing_context</code>：增大 Top-K、优化 Chunk 或启用混合检索</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：<code>RAGEvaluator</code> 批量评测与幻觉拦截</h2>
+    <div class="card">
+      <pre><code>from zhishu_agent import EvalSample, RAGEvaluator
+
+samples = [
+    EvalSample(
+        sample_id="qa-001",
+        question="星辰数科入职满1年员工每年有多少天带薪年假？",
+        answer="星辰数科入职满1年员工每年享有5天带薪年假，满10年享有10天。",
+        contexts=["星辰数科年假制度：入职满1年员工每年享有5天带薪年假，满10年享有10天。"],
+        ground_truth="入职满1年员工每年享有5天带薪年假，满10年享有10天。",
+    ),
+    EvalSample(
+        sample_id="qa-002",
+        question="生产环境 Redis 集群禁止执行什么命令？",
+        answer="生产环境 Redis 集群禁止执行 KEYS * 命令。此外每天凌晨会自动重启集群。",
+        contexts=["生产环境 Redis 集群禁止执行 KEYS * 命令，请使用 SCAN 分批遍历。"],
+        ground_truth="生产环境 Redis 集群禁止执行 KEYS * 命令，应使用 SCAN 分批遍历。",
+    ),
+]
+
+report = RAGEvaluator().evaluate_dataset(samples)
+print(report.format_summary())
+for r in report.sample_results:
+    print(r.sample_id, r.diagnostics, r.unsupported_claims)</code></pre>
+    </div>
+
+    <h2>四、课后思考与练习</h2>
+    <div class="card">
+      <p><strong>思考 1：</strong>如果某次 RAG 评测中 <code>Context Recall = 1.0</code>、<code>Context Precision = 1.0</code>，但 <code>Faithfulness = 0.33</code>，问题出在检索器还是大模型？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>问题出在<strong>生成侧（大模型）</strong>！检索器已经把正确上下文完整且精准地排在最前面送入 Prompt，但大模型没有严格遵循上下文作答，擅自脑补了未经证实的陈述（幻觉）。</p>
+      </details>
+
+      <p style="margin-top: 16px;"><strong>思考 2：</strong>为什么 <code>Context Precision</code> 不仅看“有没有召回”，还要看“排在第几位”？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>因为大模型存在 <strong>Lost in the Middle（中间迷失）</strong> 效应，且生产环境会限制上下文窗口或截断 Top-K。如果真正有用的文档排在第 3 位而前 2 位全是噪音，不仅浪费 Token，还会干扰大模型生成质量，因此 <code>Precision@K</code> 会对靠后排名的相关文档进行折损惩罚。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
