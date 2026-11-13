@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 45 | 智枢企业级智能体平台 · 第七周测验 &amp; 低代码 Workflow DSL 引擎</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：智能体开发与多智能体编排 · Day 45 | 版本 v0.4.0-day45</div>
+      <h1>第七周综合测验 &amp; 低代码 Workflow DSL 引擎（Dify/Coze 风格）</h1>
+      <p>企业需求驱动（Issue #045）：划清低代码与高代码的工程边界，并亲手实现声明式 DAG 解析、变量池插值与条件分支路由引擎</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“会用画布”到“手写画布内核”）：</strong><br />
+      在 Dify 或 Coze 中拖拽节点连线时，前端导出的其实是一份包含 <code>nodes</code> 与 <code>edges</code> 的 JSON DSL。今天我们不仅要通过第七周综合测验检验 ReAct、LangGraph、Checkpointer、Multi-Agent 与 MCP 的掌握程度，还要用纯 Python 构建一个可运行的 <strong>Workflow DSL 解析与 DAG 执行引擎</strong>！
+    </div>
+
+    <h2>一、Workflow DSL 引擎执行架构（Flowchart LR）</h2>
+    <div class="card">
+      <p>声明式工作流经过 <code>parse_workflow_dsl()</code> 校验与 Kahn 拓扑环检测后，沿激活边驱动五大核心节点流转：</p>
+      <div class="mermaid">
+        flowchart LR
+          DSL["JSON / dict DSL"] --> PARSE["parse_workflow_dsl\nSchema与Kahn环检测"]
+          PARSE --> START(["StartNode\n校验inputs与sys变量"])
+          START --> KB["KnowledgeRetrievalNode\n渲染{{sys.query}}检索"]
+          KB --> COND{"ConditionNode\n判定 kb_1.hit_count > 0"}
+          COND -->|"sourceHandle: hit"| LLM1["LLMNode (llm_rag)\n注入{{kb_1.context}}"]
+          COND -->|"sourceHandle: miss"| LLM2["LLMNode (llm_fallback)\n未命中兜底回答"]
+          LLM1 --> END1(["EndNode\nroute=knowledge_rag"])
+          LLM2 --> END2(["EndNode\nroute=fallback"])
+      </div>
+    </div>
+
+    <h2>二、低代码（Dify/Coze）vs 高代码（LangGraph）架构边界</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>评估维度</th>
+            <th>低代码编排平台（Dify / Coze）</th>
+            <th>高代码编排引擎（LangGraph / 智枢 Pro-Code）</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>控制流表达</strong></td>
+            <td>声明式 DAG（JSON/YAML DSL），禁止任意环路</td>
+            <td>图灵完备 Python 状态图，支持循环反思与动态子图</td>
+          </tr>
+          <tr>
+            <td><strong>状态与持久化</strong></td>
+            <td>全局分层变量池 <code>{{node_id.field}}</code></td>
+            <td>细粒度 <code>SQLiteCheckpointer</code>、时间旅行与断点恢复</td>
+          </tr>
+          <tr>
+            <td><strong>典型适用场景</strong></td>
+            <td>标准 RAG 问答、运营活动 Bot、快速 MVP 验证</td>
+            <td>Human-in-the-loop 审批、并发写章、高并发风控核心链路</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：声明式 DSL 与变量插值</h2>
+    <div class="card">
+      <p>以下片段展示了如何声明一个带条件路由的 RAG 工作流并交由 <code>WorkflowEngine</code> 执行：</p>
+      <pre><code>from zhishu_agent import WorkflowEngine, build_default_rag_workflow_dsl
+
+dsl = build_default_rag_workflow_dsl()
+engine = WorkflowEngine()
+
+# 场景 1：命中知识库 -> 走 llm_rag -> end_hit
+res_hit = engine.run(dsl, inputs={"query": "请假和报销怎么审批？"})
+print("命中路由:", res_hit.outputs["route"], "轨迹:", [r.node_id for r in res_hit.execution_trace])
+
+# 场景 2：未命中知识库 -> 走 llm_fallback -> end_miss
+res_miss = engine.run(dsl, inputs={"query": "今天食堂有什么菜？"})
+print("兜底路由:", res_miss.outputs["route"], "轨迹:", [r.node_id for r in res_miss.execution_trace])</code></pre>
+    </div>
+
+    <h2>四、第七周综合测验（Week 7 Assessment）精选自测</h2>
+    <div class="card">
+      <p>完整 10 道单选题 + 2 道编程实战题及解析见 <code>docs/weekly_quiz_and_answers.md</code>，以下为高频核心考点自测：</p>
+      <details>
+        <summary>自测题 1：为什么低代码 Workflow DSL 解析阶段必须做 Kahn 算法环检测？</summary>
+        <p>声明式工作流面向非研发人员配置，若误连出 <code>A -&gt; B -&gt; A</code> 的环路会导致运行期无限死循环与 Token 爆炸；通过 Kahn 拓扑排序可在执行前毫秒级拦截非法环。</p>
+      </details>
+      <details>
+        <summary>自测题 2：在带有 <code>interrupt_before</code> 的 LangGraph 状态图中，<code>resume()</code> 首轮为什么要跳过中断检查？</summary>
+        <p>因为断点正是停留在被拦截节点之前；若恢复首轮不跳过拦截检查，引擎会在同一节点再次触发 <code>interrupted</code>，导致人工永远无法推进任务。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
