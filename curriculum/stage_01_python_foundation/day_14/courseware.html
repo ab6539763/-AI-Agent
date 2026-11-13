@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 14 | 智枢企业级智能体平台 · 第一阶段里程碑项目一</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 收官里程碑 · Day 14 | 版本 v0.1.0-day14</div>
+      <h1>项目一：命令行多轮对话 AI 助手（Phase 1 Capstone）</h1>
+      <p>企业需求驱动：整合 Day 01-13 全部工程能力，交付支持多轮上下文记忆、斜杠命令治理、JSON 持久化与异常重试回滚的智枢 CLI 助手</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（第一阶段总结）：</strong><br />
+      恭喜你走到第 14 天！两周前，我们还在配置国内 PyPI 镜像和编写第一份员工数字名片；今天，你已经能用标准工程架构交付一个真正可运行的企业级 <strong>命令行多轮对话 AI 助手</strong>（<code>v0.1.0-day14</code>）。这不仅是第一阶段 Python 编程基础的毕业答卷，更是第二阶段升级 FastAPI + SSE 网页版对话系统（<code>v0.2.0</code>）的坚实地基！
+    </div>
+
+    <h2>一、第一阶段（Day 01 - Day 14）能力演进全景</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>迭代周期</th>
+            <th>核心工程主题</th>
+            <th>在项目一中的落地模块</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Day 01 - 05</td>
+            <td>环境治理、文本清洗、配置管理与结构化 JSON 解析</td>
+            <td><code>message.py</code> 序列化与 UTF-8 JSON 会话持久化</td>
+          </tr>
+          <tr>
+            <td>Day 06 - 09</td>
+            <td>函数式重构、OOP 封装、继承多态与 <code>@property</code></td>
+            <td><code>MultiTurnAssistant</code> 与 <code>ChatMessage</code> 面向对象设计</td>
+          </tr>
+          <tr>
+            <td>Day 10 - 13</td>
+            <td><code>httpx</code> HTTP 通信、装饰器重试与自定义异常体系</td>
+            <td><code>llm_client.py</code>、<code>decorators.py</code>、<code>exceptions.py</code></td>
+          </tr>
+          <tr>
+            <td><strong>Day 14（今天）</strong></td>
+            <td><strong>项目一集成交付、CLI 交互闭环与全量 QA 验收</strong></td>
+            <td><code>chat_assistant.py</code>、<code>main.py</code>、13 项 <code>pytest</code> 全覆盖</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>二、项目一系统架构与交互闭环</h2>
+    <div class="card">
+      <p>为了兼顾<strong>线上真实大模型调用</strong>与<strong>离线 CI 自动化测试</strong>，我们在 <code>LLMClient</code> 中设计了双通道切换机制：检测到 <code>OPENAI_API_KEY</code> 时直连在线 API；未配置 Key 时自动回退至 <code>httpx.MockTransport</code> 离线模拟通道。</p>
+      <div class="mermaid">
+        flowchart LR
+          User["用户输入"] --> Router{"是否以 / 开头?"}
+          Router -- "是: 斜杠指令" --> Cmd["handle_command()<br/>/clear /save /load /stats /exit"]
+          Router -- "否: 对话文本" --> Ask["ask() 追加 user 消息"]
+          Ask --> Client["LLMClient.chat_completion()<br/>@retry_on_error 指数退避"]
+          Client --> Transport{"API Key 是否存在?"}
+          Transport -- "是" --> Live["Live OpenAI API"]
+          Transport -- "否" --> Mock["httpx.MockTransport"]
+          Client -- "失败" --> Rollback["pop() 回滚未提交 user 消息"]
+          Client -- "成功" --> Commit["追加 assistant 消息并累加 Token"]
+      </div>
+    </div>
+
+    <h2>三、核心斜杠命令与工程亮点</h2>
+    <div class="card">
+      <h3>1. 事务性异常回滚（杜绝脏上下文）</h3>
+      <p>在多轮对话中，如果第 N 轮请求因为网络超时或 401 鉴权失败而报错，已经 <code>append</code> 进 <code>messages</code> 的用户提问必须立即 <code>pop()</code> 回滚，否则下一轮发送给大模型时会出现连续两条 <code>user</code> 消息的畸形上下文。</p>
+      <pre><code>try:
+    response = self.client.chat_completion(self.messages, temperature=self.temperature)
+except ZhiShuError:
+    self.messages.pop()  # 事务回滚：保证上下文始终成对完整
+    raise</code></pre>
+
+      <h3>2. 斜杠命令速查表</h3>
+      <table>
+        <thead>
+          <tr><th>指令</th><th>功能说明</th><th>工程细节</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>/clear</code></td><td>清空对话历史</td><td>保留初始 <code>System Prompt</code>，并重置轮数与 Token 计数</td></tr>
+          <tr><td><code>/save &lt;path&gt;</code></td><td>导出会话 JSON</td><td>自动创建父目录，写入版本、时间戳、统计与完整消息列表</td></tr>
+          <tr><td><code>/load &lt;path&gt;</code></td><td>恢复历史会话</td><td>校验文件存在性与 JSON 合法性，失败抛出 <code>CommandError</code></td></tr>
+          <tr><td><code>/stats</code></td><td>查看运行统计</td><td>展示模型名、Mock/Live 模式、轮数与三项 Token 消耗</td></tr>
+          <tr><td><code>/exit</code></td><td>退出 CLI 循环</td><td>返回终止信号 <code>(False, ...)</code>，优雅结束会话</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>四、本地启动与验收命令</h2>
+    <div class="card">
+      <pre><code># 1. 启动交互式命令行 AI 助手（无 Key 自动进入 Mock 模式）
+.venv/bin/python project_iterations/day_14/main.py
+
+# 2. 一键运行 Day 14 Notebook 实操与 pytest 全量单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_01_python_foundation/day_14/notebook.ipynb \
+  --iter project_iterations/day_14</code></pre>
+      <details>
+        <summary>点击查看：如何切换到真实 OpenAI / 兼容接口？</summary>
+        <p>只需在终端中导出环境变量 <code>OPENAI_API_KEY</code>（以及可选的 <code>OPENAI_BASE_URL</code>），<code>LLMClient</code> 即可自动切换至 Live 在线 API 模式，无需修改任何业务代码。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
