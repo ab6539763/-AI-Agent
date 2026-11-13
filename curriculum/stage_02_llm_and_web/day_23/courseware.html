@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 23 | 智枢企业级智能体平台 · FastAPI 后端服务开发 Part 1</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第二阶段：大模型原理与 Web 服务工程 · Day 23 | 版本 v0.2.0-day23</div>
+      <h1>FastAPI 后端服务开发 Part 1：路由、参数绑定与 Pydantic 契约</h1>
+      <p>企业需求驱动（Issue #023）：将本地智能体引擎升级为标准化 REST API 服务，掌握 Path/Query 参数、Pydantic v2 校验与 TestClient 自动化测试</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（Day 23 开篇）：</strong><br />
+      前面的课程中，我们的智枢智能体一直跑在命令行终端里。但在真实企业里，前端 React 页面、飞书/企微机器人和移动端 App 都需要通过 <strong>HTTP REST API</strong> 来调用智能体。今天我们正式引入 <strong>FastAPI</strong>：它基于 Python 类型注解与 <strong>Pydantic v2</strong>，不仅性能比肩 Go/Node.js，还能自动校验参数、返回规范的 <code>422</code> 错误，并免费生成交互式 Swagger 文档！
+    </div>
+
+    <h2>一、FastAPI 请求处理生命周期与架构流转</h2>
+    <div class="card">
+      <p>当客户端向 FastAPI 发送 HTTP 请求时，请求会先经过 Starlette 路由分发，再由 Pydantic v2 对路径参数、查询参数和 JSON 请求体进行强类型解析与业务校验，全部通过后才进入业务逻辑函数。</p>
+      <div class="mermaid">
+        sequenceDiagram
+          autonumber
+          actor Client as 调用方 (前端 / TestClient)
+          participant Router as FastAPI 路由分发
+          participant Pydantic as Pydantic v2 校验层
+          participant Handler as 业务处理器
+          Client->>Router: POST /api/v1/chat (JSON)
+          Router->>Pydantic: 校验 ChatRequest
+          alt 校验失败 (空白消息 / 温度越界 / 未知模型)
+            Pydantic-->>Client: 422 Unprocessable Entity
+          else 校验通过
+            Pydantic->>Handler: 注入强类型 payload
+            Handler-->>Client: 200 OK (ChatResponse JSON)
+          end
+      </div>
+    </div>
+
+    <h2>二、核心知识点：路由、Path/Query 参数与 Pydantic 模型</h2>
+    <div class="card">
+      <h3>1. 三大核心端点设计（<code>zhishu_agent/api_server.py</code>）</h3>
+      <table>
+        <thead>
+          <tr><th>HTTP 方法与路径</th><th>参数类型</th><th>核心职责与状态码</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET /api/v1/health</code></td>
+            <td>无参数</td>
+            <td>健康检查探针，返回 <code>200 OK</code> 与版本号 <code>0.2.0-day23</code></td>
+          </tr>
+          <tr>
+            <td><code>GET /api/v1/models/{model_id}</code></td>
+            <td>Path (<code>model_id</code>) + Query (<code>include_pricing</code>, <code>detail_level</code>)</td>
+            <td>查询模型元信息；存在返回 <code>200 OK</code>，不存在返回 <code>404</code>，参数非法返回 <code>422</code></td>
+          </tr>
+          <tr>
+            <td><code>POST /api/v1/chat</code></td>
+            <td>JSON Body (<code>ChatRequest</code>)</td>
+            <td>执行智能体对话并返回 <code>ChatResponse</code>（含 Token 统计与延迟）</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h3>2. Pydantic v2 请求体与自定义校验器</h3>
+      <pre><code>class ChatRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+    model: str = Field(default="deepseek-chat")
+    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=512, ge=1, le=8192)
+    session_id: str | None = Field(default=None, max_length=64)
+
+    @field_validator("message")
+    @classmethod
+    def validate_message_not_blank(cls, value: str) -&gt; str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("message 不能为空或仅包含空白字符")
+        return stripped</code></pre>
+    </div>
+
+    <h2>三、进程内零端口测试：<code>fastapi.testclient.TestClient</code></h2>
+    <div class="card">
+      <p>在开发与 CI 阶段，我们无需每次都手动启动 <code>uvicorn</code> 进程。借助基于 <code>httpx</code> 的 <code>TestClient(app)</code>，可以直接在内存中模拟完整 HTTP 请求与状态码断言：</p>
+      <pre><code>from fastapi.testclient import TestClient
+from zhishu_agent.api_server import app
+
+client = TestClient(app)
+assert client.get("/api/v1/health").status_code == 200
+assert client.post("/api/v1/chat", json={"message": "   "}).status_code == 422</code></pre>
+
+      <details>
+        <summary>💡 思考题：为什么 <code>GET /api/v1/models/unknown-model</code> 返回 404，而 <code>POST /api/v1/chat</code> 传入未知模型返回 422？</summary>
+        <p>在 REST 语义中，URL 路径里的 <code>{model_id}</code> 代表“资源定位”，资源不存在应返回 <code>404 Not Found</code>；而 <code>POST /api/v1/chat</code> 请求体中的 <code>model</code> 字段属于“表单/载荷参数校验”，不满足 <code>ChatRequest</code> 的 <code>@field_validator</code> 约束时由 Pydantic 拦截并返回 <code>422 Unprocessable Entity</code>。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
