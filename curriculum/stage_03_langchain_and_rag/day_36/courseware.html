@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 36 | 智枢企业级智能体平台 · 里程碑项目 2 Part 1：企业知识库问答系统后端</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 36 | 版本 v0.3.0-day36</div>
+      <h1>里程碑项目 2 Part 1：企业知识库问答系统后端</h1>
+      <p>企业需求驱动（Issue #036）：多格式文档解析（.txt/.md/.csv）、BM25 + 向量混合检索 + RRF + Rerank、引用溯源与 SQLite 会话持久化</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“技术组件”到“企业级后端服务”）：</strong><br />
+      欢迎来到里程碑项目 2 的第一天！今天我们要把 Stage 3 学到的切片、Embedding、BM25、RRF、Rerank 与防幻觉引用机制全部组装进 <code>EnterpriseKBService</code>，并接入 SQLite 持久化多轮会话与引用来源，打造真正可上线的企业知识库后端。
+    </div>
+
+    <h2>一、系统端到端架构总览</h2>
+    <div class="card">
+      <p><code>EnterpriseKBService</code> 将离线入库链路与在线问答链路解耦为四大核心层级：</p>
+      <div class="mermaid">
+        flowchart LR
+          A["多格式上传 (.txt / .md / .csv)"] --> B["解析与智能切分"]
+          B --> C["BM25 + 向量双路索引"]
+          Q["用户提问"] --> D["混合检索 + RRF 融合"]
+          C --> D
+          D --> E["Rerank 精排"]
+          E -->|"高于阈值"| F["带 [1][2] 引用回答"]
+          E -->|"低于阈值"| G["安全拒答"]
+          F --> H[("SQLite 会话历史")]
+          G --> H
+      </div>
+    </div>
+
+    <h2>二、四大核心模块设计拆解</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>模块</th>
+            <th>核心类 / 方法</th>
+            <th>关键工程设计</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>多格式解析入库</td>
+            <td><code>ingest_file()</code> / <code>_parse_and_chunk()</code></td>
+            <td><code>.txt</code> 滑动窗口切分；<code>.md</code> 保留章节标题上下文；<code>.csv</code> 逐行转键值对文本</td>
+          </tr>
+          <tr>
+            <td>混合检索与精排</td>
+            <td><code>retrieve()</code> / <code>_compute_rerank_score()</code></td>
+            <td>BM25 稀疏检索 + LocalEmbedding 余弦检索 + RRF(k=60) + 精排重排序</td>
+          </tr>
+          <tr>
+            <td>引用溯源与拒答</td>
+            <td><code>ask()</code> / <code>Citation</code></td>
+            <td>生成内联编号 <code>[1][2]</code> 与来源片段；低于 <code>min_relevance_score</code> 时触发安全拒答</td>
+          </tr>
+          <tr>
+            <td>SQLite 会话存储</td>
+            <td><code>SQLiteSessionStore</code></td>
+            <td>持久化 <code>sessions</code> 与 <code>messages</code> 表（含 <code>citations_json</code>），支持重启恢复</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：<code>EnterpriseKBService</code> 全链路运行</h2>
+    <div class="card">
+      <pre><code>from pathlib import Path
+from zhishu_agent import EnterpriseKBService
+
+kb = EnterpriseKBService(db_path="kb_sessions.db", chunk_size=200, chunk_overlap=30)
+kb.ingest_text(
+    "# Redis 规范\n生产环境 Redis 集群严禁执行 KEYS * 命令，应使用 SCAN 分批遍历。",
+    source="sre_runbook.md",
+    file_type=".md",
+)
+
+resp = kb.ask("生产环境 Redis 禁止执行什么命令？", session_id="ops-001")
+print(resp.format_with_sources())
+print("历史消息数:", len(kb.get_session_history("ops-001")))
+kb.close()</code></pre>
+    </div>
+
+    <h2>四、课后思考与练习</h2>
+    <div class="card">
+      <p><strong>思考 1：</strong>为什么解析 Markdown（<code>.md</code>）时要把上级标题（如 <code>## 熔断策略</code>）保留在每个子切片的开头？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>当一篇长文档按长度切分成多个 Chunk 后，靠后的切片往往只包含正文细节而缺少主语（例如只写了“超过 5% 触发自动操作”）。保留章节标题前缀相当于为切片注入了结构化上下文，能大幅提升 BM25 和向量检索的召回准确率。</p>
+      </details>
+
+      <p style="margin-top: 16px;"><strong>思考 2：</strong>为什么把 <code>citations_json</code> 一并存入 SQLite 的 <code>messages</code> 表，而不是只存纯文本回答？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>企业级知识库前端在用户刷新页面或切换历史会话时，需要重新渲染回答下方的“可点击来源卡片（文件名、切片编号、原文片段）”，同时也便于合规审计人员追溯每一次 AI 回答的历史依据。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
