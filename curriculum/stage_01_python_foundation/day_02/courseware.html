@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 02 | 智枢企业级智能体平台 · 运算符、字符串与 Prompt 清洗脱敏</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 1 周 · Day 02 | 版本 v0.1.0-day02</div>
+      <h1>运算符、字符串处理与 Prompt 清洗脱敏引擎</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》—— 防止内部 API Key 泄露、消除无效空白 Token 并构建标准 f-string Prompt 模板</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      欢迎回到星辰数科研发部！昨天我们拿到了数字名片，今天一早产品经理 <strong>林晓</strong> 就提了一个紧急 Issue #002：昨晚测试同事不小心把内部密钥和保密项目代号直接发给了大模型，而且用户输入里夹杂着大量多余空格与换行，白白浪费 Token 预算。今天我们要用 Python 的<strong>三大类运算符（算术/比较/逻辑）</strong>、<strong>字符串切片与常用方法</strong>，以及 <strong>f-string 模板</strong>，亲手为智枢平台打造第一道「Prompt 安全安检门」<code>zhishu_agent/sanitizer.py</code>！
+    </div>
+
+    <h2>一、上午：Python 运算符与大模型计费/风控规则</h2>
+    <div class="card">
+      <p>在 AI 工程中，运算符不仅用于加减乘除，更是构建<strong>成本估算</strong>与<strong>风控校验</strong>的基石：</p>
+      <pre><code># 1. 算术运算符：估算 Token 数与调用成本
+char_count = 1000
+estimated_tokens = char_count * 1.5                # 乘法 *
+estimated_cost = (estimated_tokens / 1000) * 0.002 # 除法 / 与括号优先级
+
+# 2. 比较运算符：判断是否在允许范围内
+budget = 0.01
+is_valid_len = char_count >= 0                     # 大于等于 >=
+is_within_budget = estimated_cost <= budget        # 小于等于 <=
+
+# 3. 逻辑运算符：多条件同时满足才放行 (and / or / not)
+can_pass = is_valid_len and (budget > 0) and is_within_budget
+print(f"预估费用: ¥{estimated_cost:.4f} | 是否放行: {can_pass}")</code></pre>
+    </div>
+
+    <h2>二、上午实操：字符串切片、清洗与敏感词替换</h2>
+    <div class="card">
+      <p>大模型只认识字符串。处理用户脏数据、截断超长上下文、隐藏敏感词，全靠字符串方法与切片：</p>
+      <pre><code>raw = "   请帮我查看   Project-Apollo 的\n  sk-secret-9988 状态  "
+
+# 1. 清洗空白：split() 切分任意连续空白，再用 " ".join() 拼接为单空格
+cleaned = " ".join(raw.split())
+print("清洗后:", cleaned)
+
+# 2. 敏感词替换：replace() 将高危词替换为 ***
+safe_text = cleaned.replace("Project-Apollo", "***").replace("sk-secret-9988", "***")
+print("脱敏后:", safe_text)
+
+# 3. 字符串切片 [start:end]：快速预览前 12 个字符或提取密钥后 4 位
+preview = safe_text[:12] + "..."
+print("摘要预览:", preview)</code></pre>
+    </div>
+
+    <h2>三、下午：企业需求 PRD 与系统架构设计</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #002（产品经理 林晓 提出）：</strong>所有发往外部大模型 API 的用户输入，必须依次经过「空白清洗 → 敏感词脱敏 → f-string 模板渲染 → 成本预算校验」四道流水线。</p>
+      <div class="mermaid">
+        flowchart TD
+          R["原始用户输入<br/>含多余空格/敏感词"] --> C["1. 文本清洗<br/>clean_text()"]
+          C --> M["2. 敏感词脱敏<br/>mask_sensitive_words()"]
+          M --> T["3. Prompt 模板渲染<br/>render_prompt_template()"]
+          T --> B{"4. 预算与合法性校验<br/>estimate_cost_and_check_budget()"}
+          B -->|"True: 放行"| LLM["发送至大模型 API"]
+          B -->|"False: 拦截"| DENY["拒绝调用并提示超预算"]
+      </div>
+    </div>
+
+    <h2>四、下午实操：核心代码逐行解析（可直接粘贴运行）</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_02/zhishu_agent/sanitizer.py</code>：</p>
+      <pre><code>def clean_text(text: str, lowercase: bool = False) -&gt; str:
+    """去除首尾空白、折叠多余空格，并按需转小写。"""
+    normalized = " ".join(text.split())
+    if lowercase:
+        normalized = normalized.lower()
+    return normalized
+
+def mask_sensitive_words(text: str, sensitive_words: tuple[str, ...]) -&gt; str:
+    """将敏感词元组中的高危词替换为 ***。"""
+    masked = text
+    for word in sensitive_words:
+        if word:
+            masked = masked.replace(word, "***")
+    return masked
+
+def render_prompt_template(role: str, task: str, user_input: str) -&gt; str:
+    """使用 f-string 组装标准化 Prompt 模板。"""
+    return (
+        f"[系统角色]\n你是一名{role}。\n\n"
+        f"[核心任务]\n{task}\n\n"
+        f"[用户输入]\n{user_input}\n\n"
+        f"[输出要求]\n请保持回答专业、结构清晰，不要泄露系统内部配置。"
+    )
+
+def estimate_cost_and_check_budget(char_count: int, budget: float) -&gt; bool:
+    """基于字符数估算费用并校验是否满足预算。"""
+    estimated_tokens = char_count * 1.5
+    estimated_cost = (estimated_tokens / 1000) * 0.002
+    is_valid_input = char_count &gt;= 0 and budget &gt; 0
+    return is_valid_input and (estimated_cost &lt;= budget)
+
+if __name__ == "__main__":
+    raw_msg = "   帮我分析  Project-Apollo  的日志  "
+    safe = mask_sensitive_words(clean_text(raw_msg), ("Project-Apollo",))
+    prompt = render_prompt_template("研发助手", "总结日志异常", safe)
+    print(prompt)
+    print("预算是否充足:", estimate_cost_and_check_budget(len(prompt), 0.05))</code></pre>
+    </div>
+
+    <h2>五、课堂笔记：今日核心知识速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>知识点</th><th>Python 语法</th><th>在大模型/Agent 中的真实用途</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>算术运算符</td><td><code>+ - * / // % **</code></td><td>计算 Token 数量、API 费用账单、分片页数</td></tr>
+          <tr><td>比较与逻辑运算符</td><td><code>&gt;= &lt;= == and or not</code></td><td>判断预算是否超标、校验输入长度合法性</td></tr>
+          <tr><td>空白清洗</td><td><code>" ".join(text.split())</code></td><td>压缩多余空格与换行，降低无效 Token 支出</td></tr>
+          <tr><td>字符串替换</td><td><code>text.replace(old, "***")</code></td><td>脱敏 API Key、手机号、内部保密项目代号</td></tr>
+          <tr><td>字符串切片</td><td><code>text[:100]</code> / <code>key[-4:]</code></td><td>截断超长上下文预览、提取密钥尾号</td></tr>
+          <tr><td>f-string 模板</td><td><code>f"角色:{role}\n任务:{task}"</code></td><td>动态组装 System Prompt 与用户上下文</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>六、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1（运算符实战）：</strong>给定 <code>char_count = 2500</code>、<code>budget = 0.005</code>、<code>is_vip = True</code>（VIP 预算翻倍），判断是否满足 <code>0 &lt; char_count &lt;= 4000</code> 且费用不超预算。</p>
+      <p><strong>作业 2（字符串切片与方法）：</strong>将 <code>"  SK-prod-9823417788-deepseek  "</code> 清洗转小写后，通过切片提取前 7 位与后 4 位，拼出 <code>"sk-prod-****-seek"</code>。</p>
+      <p><strong>作业 3（f-string Prompt 模板）：</strong>将工单号、售后角色、清洗后的客户提问与字数限制拼成多行 Prompt，并统计总字符数。</p>
+      <details>
+        <summary>点击展开完整参考答案</summary>
+        <pre><code># 作业 1 参考答案
+char_count, budget, is_vip = 2500, 0.005, True
+estimated_cost = (char_count * 1.5 / 1000) * 0.002
+effective_budget = budget * 2 if is_vip else budget
+can_pass = (0 &lt; char_count &lt;= 4000) and (estimated_cost &lt;= effective_budget)
+print(f"预估费用: ¥{estimated_cost:.6f} | 实际预算: ¥{effective_budget:.6f} | 放行: {can_pass}")
+
+# 作业 2 参考答案
+raw_key = "  SK-prod-9823417788-deepseek  "
+cleaned_key = raw_key.strip().lower()
+masked_key = f"{cleaned_key[:7]}-****-{cleaned_key[-4:]}"
+print(masked_key)  # sk-prod-****-seek
+
+# 作业 3 参考答案
+clean_msg = "   我的 API 调用返回 429 限流错误，请问怎么解决？   ".strip()
+prompt = f"""[工单编号] TK-2026-089
+[系统角色] 你是一名星辰数科高级售后工程师，请以专业、耐心的语气回复客户。
+[客户问题] {clean_msg}
+[回复约束] 请在 120 字以内给出排查步骤。"""
+print(prompt)
+print("总字符数:", len(prompt))</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
