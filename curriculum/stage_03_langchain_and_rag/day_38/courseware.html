@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 38 | 智枢企业级智能体平台 · Project 2 答辩与 AST 工程代码审计</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 38 | 版本 v0.3.0-day38</div>
+      <h1>Project 2 答辩与工程代码审计：AST 静态质量门禁</h1>
+      <p>企业需求驱动（Issue #038）：基于 Python <code>ast</code> 构建零依赖静态审计器，完成 Stage 3 企业级 RAG 知识库项目答辩与 QA 验收</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（第三阶段收官之战）：</strong><br />
+      欢迎来到 Day 38！在企业研发中，“功能跑通”只是 60 分，“代码可维护、无安全隐患、指标可量化”才是 100 分。今天我们不仅要完成 Project 2（企业级 RAG 系统）的 10 分钟项目答辩，还要亲手打造一套工业级 <strong>Python AST 静态质量审计器</strong>，把 Docstring、Type Hints、<code>eval/exec</code> 拦截与硬编码密钥扫描接入自动化验收流程！
+    </div>
+
+    <h2>一、AST 静态代码审计流水线架构</h2>
+    <div class="card">
+      <p>不同于脆弱的正则表达式，<code>ast.parse()</code> 能将 Python 源码解析为精确的抽象语法树（Abstract Syntax Tree），从而零误报地识别语法结构：</p>
+      <div class="mermaid">
+        flowchart TD
+          DIR["迭代目录 project_iterations/day_XX"] --> WALK["递归扫描 *.py (跳过 __pycache__/.venv)"]
+          WALK --> PARSE["ast.parse() 构建语法树"]
+          PARSE -->|"SyntaxError"| ERR_SYN["记录 syntax-error (Error 阻断)"]
+          PARSE -->|"成功"| AST["ast.walk(tree) 遍历节点"]
+          AST --> DOC["Docstring 覆盖率 (Module / Class / Func)"]
+          AST --> HINT["Type Hints 覆盖率 (参数豁免 self/cls & 返回值)"]
+          AST --> CALL["ast.Call 拦截 eval() / exec()"]
+          AST --> KEY["ast.Constant 扫描 sk-... 硬编码密钥"]
+          DOC --> RPT["ProjectAuditReport & format_summary()"]
+          HINT --> RPT
+          CALL --> RPT
+          KEY --> RPT
+          ERR_SYN --> RPT
+      </div>
+    </div>
+
+    <h2>二、核心审计规则与门禁分级</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>规则 ID</th>
+            <th>AST 检测目标</th>
+            <th>严重级别</th>
+            <th>工程意义与修复建议</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>missing-*-docstring</code></td>
+            <td>Module / <code>ast.ClassDef</code> / <code>ast.FunctionDef</code></td>
+            <td><code>warning</code></td>
+            <td>保证团队协作可读性与 API 文档自动生成能力</td>
+          </tr>
+          <tr>
+            <td><code>missing-type-hints</code></td>
+            <td>函数参数（豁免 <code>self</code>/<code>cls</code>）与 <code>returns</code></td>
+            <td><code>warning</code></td>
+            <td>配合 mypy/pyright 提前暴露类型契约错误</td>
+          </tr>
+          <tr>
+            <td><code>forbidden-dynamic-exec</code></td>
+            <td><code>ast.Call</code> 调用 <code>eval</code> / <code>exec</code></td>
+            <td><code>error</code>（阻断）</td>
+            <td>严防代码注入（RCE）高危漏洞，改用安全解析器</td>
+          </tr>
+          <tr>
+            <td><code>hardcoded-api-key</code></td>
+            <td>字符串常量匹配 <code>sk-[A-Za-z0-9_-]{10,}</code></td>
+            <td><code>error</code>（阻断）</td>
+            <td>防止敏感凭证泄漏至 Git，必须通过环境变量注入</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：<code>audit_project_dir</code> 批量工程体检</h2>
+    <div class="card">
+      <pre><code>from pathlib import Path
+from zhishu_agent import audit_project_dir, audit_python_file
+
+# 1. 对单个文件执行 AST 静态审计
+file_report = audit_python_file("project_iterations/day_37/zhishu_agent/kb_service.py")
+print(f"Docstring 覆盖率: {file_report.docstring_coverage:.1%}")
+print(f"Type Hint 覆盖率: {file_report.type_hint_coverage:.1%}")
+
+# 2. 对整个迭代目录执行批量审计与安全门禁校验
+project_report = audit_project_dir("project_iterations/day_37")
+print(project_report.format_summary())
+assert project_report.passed, "存在阻断级安全或语法问题！"</code></pre>
+    </div>
+
+    <h2>四、课后思考与阶段复盘</h2>
+    <div class="card">
+      <p><strong>思考 1：</strong>为什么我们在检查函数调用时使用 <code>isinstance(node, ast.Call)</code> 而不是直接用正则搜 <code>r"eval\("</code>？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>如果源码的注释或帮助文档里写了 <code># 请勿使用 eval()</code>，纯正则表达式会产生<strong>误报（False Positive）</strong>；而基于 <code>ast.Call</code> 节点检测只会匹配真实的可执行调用语法，实现零误报。</p>
+      </details>
+
+      <p style="margin-top: 16px;"><strong>思考 2：</strong>在 Project 2（Stage 3）中，Ragas 评估体系与 AST 代码审计各自守护了系统的哪道防线？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p><strong>Ragas 评估</strong>守护的是 AI 应用的<strong>业务效果防线</strong>（检索召回、排序精度、模型幻觉与相关性）；<strong>AST 代码审计</strong>守护的是软件工程的<strong>代码质量与安全防线</strong>（类型契约、文档规范、零密钥泄漏与零危险动态执行）。两者结合，才构成企业级 AI 工程交付的完整闭环。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
