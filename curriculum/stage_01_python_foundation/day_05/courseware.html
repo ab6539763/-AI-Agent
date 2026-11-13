@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 05 | 智枢企业级智能体平台 · JSON 解析与大模型 API 数据交换</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 1 周 · Day 05 | 版本 v0.1.0-day05</div>
+      <h1>JSON 解析与大模型 API 数据交换：智枢平台解析引擎</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》—— OpenAI/DeepSeek 标准响应解析、中文会话持久化与 Token 用量聚合</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      各位同学好，欢迎来到第 5 天！在真实企业开发中，无论是调用 OpenAI、DeepSeek 还是本地部署的 Qwen，底层全部靠 <strong>JSON</strong> 传递消息与账单。很多新手写 Agent 时容易把解析逻辑直接硬编码在业务代码里，一旦字段缺失或遇到中文编码就报错。今天我们作为工程师 <strong>陈默</strong>，正式为智枢平台构建独立的 <code>zhishu_agent/json_parser.py</code> 模块，并用 <code>pytest</code> 的 <code>tmp_path</code> 夹具完成全自动化测试！
+    </div>
+
+    <h2>一、上午：JSON 与大模型 API 协议全景</h2>
+    <div class="card">
+      <p>大模型 Chat Completions 接口的核心数据结构是高度规范的嵌套 JSON。理解“Python 对象”与“JSON 文本”之间的双向转换，是所有 AI 应用开发者的基本功：</p>
+      <div class="mermaid">
+        flowchart LR
+          PY["Python 字典/列表<br/>dict / list"] -->|"json.dumps() / json.dump()<br/>(序列化 + ensure_ascii=False)"| JSON["JSON 文本 / 本地文件<br/>UTF-8 字符串"]
+          JSON -->|"json.loads() / json.load()<br/>(反序列化)"| PY
+      </div>
+    </div>
+
+    <h2>二、下午：企业需求 PRD 与系统架构设计</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #005（产品经理 林晓 提出）：</strong>智枢平台需要一套标准 JSON 解析与会话持久化工具，能够从大模型 API 响应中提取核心回复与 Token 消耗，将中文对话历史无损保存至本地，并支持对多次调用的 Token 用量进行汇总。</p>
+      <div class="mermaid">
+        flowchart TD
+          R["模拟 LLM API 原始 JSON"] -->|"json.loads()"| E["响应解析器<br/>extract_llm_response()"]
+          E -->|"id / model / content / tokens"| O["扁平业务字典"]
+          M["中文对话历史 list[dict]"] -->|"json.dump(ensure_ascii=False, indent=2)"| F["本地会话文件 (.json)"]
+          F -->|"json.load()"| L["恢复上下文 load_session_json()"]
+          RS["多次 API 响应列表"] -->|"嵌套字典遍历"| U["用量聚合器 summarize_usage()"]
+      </div>
+    </div>
+
+    <h2>三、下午实操：核心代码逐行解析（可直接粘贴运行）</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_05/zhishu_agent/json_parser.py</code>：</p>
+      <pre><code>import json
+from pathlib import Path
+from typing import Any
+
+
+def extract_llm_response(raw_json: str) -&gt; dict[str, Any]:
+    """解析模拟的 OpenAI / DeepSeek API 响应 JSON 字符串。"""
+    try:
+        data = json.loads(raw_json)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"LLM 响应 JSON 解析失败: {exc}") from exc
+
+    if not isinstance(data, dict):
+        raise ValueError("LLM 响应根节点必须为 JSON 对象 (dict)")
+
+    choices = data.get("choices")
+    if not isinstance(choices, list) or len(choices) == 0:
+        raise ValueError("LLM 响应缺少有效的 choices 列表")
+
+    content = choices[0].get("message", {}).get("content", "")
+    usage = data.get("usage", {})
+
+    return {
+        "id": str(data.get("id", "")),
+        "model": str(data.get("model", "")),
+        "content": str(content),
+        "prompt_tokens": int(usage.get("prompt_tokens", 0)),
+        "completion_tokens": int(usage.get("completion_tokens", 0)),
+        "total_tokens": int(usage.get("total_tokens", 0)),
+    }
+
+
+def save_session_json(filepath: Path, messages: list[dict[str, Any]]) -&gt; None:
+    """将多轮对话保存为 JSON 文件（保留中文与缩进）。"""
+    target = Path(filepath)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("w", encoding="utf-8") as f:
+        json.dump(messages, f, ensure_ascii=False, indent=2)
+
+
+def load_session_json(filepath: Path) -&gt; list[dict[str, Any]]:
+    """从本地 JSON 文件加载多轮对话历史。"""
+    target = Path(filepath)
+    if not target.exists():
+        raise FileNotFoundError(f"会话文件不存在: {target}")
+    with target.open("r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def summarize_usage(responses: list[dict[str, Any]]) -&gt; dict[str, int]:
+    """遍历多次响应字典，聚合统计 Token 消耗。"""
+    total_prompt = total_completion = total_all = 0
+    for resp in responses:
+        usage = resp.get("usage", {})
+        prompt = int(usage.get("prompt_tokens", 0))
+        completion = int(usage.get("completion_tokens", 0))
+        total = int(usage.get("total_tokens", prompt + completion))
+        total_prompt += prompt
+        total_completion += completion
+        total_all += total
+    return {
+        "request_count": len(responses),
+        "prompt_tokens": total_prompt,
+        "completion_tokens": total_completion,
+        "total_tokens": total_all,
+    }</code></pre>
+    </div>
+
+    <h2>四、课堂笔记：今日核心知识速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>API / 语法</th><th>作用</th><th>企业开发避坑指南</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>json.loads(s)</code></td><td>JSON 字符串 → Python 对象</td><td>务必用 <code>try...except json.JSONDecodeError</code> 捕获非法格式</td></tr>
+          <tr><td><code>json.dump(obj, f)</code></td><td>Python 对象 → 写入 JSON 文件</td><td><strong>必须</strong>传 <code>ensure_ascii=False, indent=2</code> 与 <code>encoding="utf-8"</code></td></tr>
+          <tr><td><code>json.load(f)</code></td><td>读取 JSON 文件 → Python 对象</td><td>读取前检查 <code>filepath.exists()</code>，并校验根节点类型</td></tr>
+          <tr><td><code>dict.get(key, default)</code></td><td>安全读取嵌套字典字段</td><td>避免深层嵌套（如 <code>usage</code> 缺失）直接触发 <code>KeyError</code></td></tr>
+          <tr><td><code>pytest tmp_path</code></td><td>Pytest 内置临时目录夹具</td><td>文件读写单元测试禁止污染真实项目目录，统一用 <code>tmp_path</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>五、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1（嵌套字典提取）：</strong>从包含 <code>tool_calls</code> 的响应 JSON 中提取 <code>tool_name</code>，并将字符串格式的 <code>arguments</code> 二次解析为 Python 字典。</p>
+      <p><strong>作业 2（中文 JSON 持久化）：</strong>使用 <code>pathlib.Path</code> 保存含中文的 Agent 配置字典，确保不出现 <code>\uXXXX</code> 转义并重新加载断言验证。</p>
+      <p><strong>作业 3（多模型用量聚合）：</strong>编写 <code>aggregate_usage_by_model(responses)</code>，按 <code>model</code> 分组统计调用次数与 <code>total_tokens</code>。</p>
+      <details>
+        <summary>点击展开完整参考答案</summary>
+        <pre><code>import json
+from pathlib import Path
+
+# 作业 1 参考答案：Function Calling 嵌套提取
+def extract_tool_call(raw_json: str) -&gt; dict:
+    data = json.loads(raw_json)
+    fn = data["choices"][0]["message"]["tool_calls"][0]["function"]
+    return {
+        "tool_name": fn["name"],
+        "arguments": json.loads(fn["arguments"]),
+    }
+
+# 作业 2 参考答案：中文 JSON 序列化
+config = {"agent_name": "智枢客服专员", "model": "deepseek-chat", "tags": ["企业知识库", "中文优先"]}
+p = Path("agent_config.json")
+with p.open("w", encoding="utf-8") as f:
+    json.dump(config, f, ensure_ascii=False, indent=2)
+with p.open("r", encoding="utf-8") as f:
+    loaded = json.load(f)
+assert loaded["agent_name"] == "智枢客服专员"
+
+# 作业 3 参考答案：按模型聚合 Token 用量
+def aggregate_usage_by_model(responses: list[dict]) -&gt; dict[str, dict[str, int]]:
+    stats: dict[str, dict[str, int]] = {}
+    for resp in responses:
+        model = resp.get("model", "unknown")
+        tokens = int(resp.get("usage", {}).get("total_tokens", 0))
+        if model not in stats:
+            stats[model] = {"calls": 0, "total_tokens": 0}
+        stats[model]["calls"] += 1
+        stats[model]["total_tokens"] += tokens
+    return stats</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
