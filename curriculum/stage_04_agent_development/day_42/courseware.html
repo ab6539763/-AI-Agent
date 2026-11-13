@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 42 | 智枢企业级智能体平台 · 高级 LangGraph 状态图与写作智能体</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第四阶段：智能体开发与多智能体编排 · Day 42 | 版本 v0.4.0-day42</div>
+      <h1>高级 LangGraph 状态图：Checkpointer、Human-in-the-loop、并发节点与写作智能体</h1>
+      <p>企业需求驱动（Issue #042）：构建可持久化、可人工审批暂停/恢复、并发撰写且具备节点级重试自愈能力的生产级 Writing Agent</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（生产级状态图核心四件套）：</strong><br />
+      在企业级智能体落地中，单次同步调用往往无法应对长耗时任务与高风险决策。今天我们将为智枢平台打造四大生产级基础设施：<strong>SQLiteCheckpointer</strong>（按 <code>thread_id</code> 持久化断点）、<strong>interrupt_before / resume</strong>（人工审稿门禁）、<strong>ParallelSectionRunner</strong>（多线程并发写章）以及 <strong>RetryPolicy</strong>（节点级指数退避重试）。
+    </div>
+
+    <h2>一、Writing Agent 全链路状态机架构</h2>
+    <div class="card">
+      <p>Writing Agent 将长文创作拆解为“大纲生成 → 人工审批拦截 → 并发章节撰写 → 终稿汇总润色”四段式状态机：</p>
+      <div class="mermaid">
+        flowchart TD
+          START(["START: 输入 topic"]) --> OUTLINE["Outline: generate_outline 生成大纲"]
+          OUTLINE -->|"SQLiteCheckpointer 保存快照"| INT["[Interrupt/Approve] interrupt_before 人工审批暂停"]
+          INT -->|"resume(thread_id, updated_state)"| CHECK{"approved == True ?"}
+          CHECK -->|"False (打回重写)"| OUTLINE
+          CHECK -->|"True (通过)"| PAR["Parallel Chapters: ParallelSectionRunner (ThreadPoolExecutor + RetryPolicy)"]
+          PAR --> POLISH["Polish: final_polish 汇总润色"]
+          POLISH --> END_NODE(["END: 输出 final_article"])
+      </div>
+    </div>
+
+    <h2>二、四大核心机制与工程设计</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>核心组件</th>
+            <th>解决的生产痛点</th>
+            <th>关键 API / 实现机制</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>SQLiteCheckpointer</code></td>
+            <td>进程崩溃或长耗时等待时状态丢失、多用户上下文串扰</td>
+            <td>按 <code>thread_id</code> 隔离存储 <code>state_json</code>、<code>next_node</code>、<code>status</code>，支持 <code>get_latest()</code> 与 <code>get_history()</code></td>
+          </tr>
+          <tr>
+            <td><code>interrupt_before</code> &amp; <code>resume()</code></td>
+            <td>高风险节点需人工把关或修订中间产物（Human-in-the-loop）</td>
+            <td>命中拦截点写入 <code>status="interrupted"</code>；恢复时合并 <code>updated_state</code> 并跳过首轮重复拦截</td>
+          </tr>
+          <tr>
+            <td><code>ParallelSectionRunner</code></td>
+            <td>多章节串行生成延迟高，且并发返回乱序</td>
+            <td><code>ThreadPoolExecutor</code> 并发执行，按原始大纲 <code>index</code> 确定性重排汇总</td>
+          </tr>
+          <tr>
+            <td><code>RetryPolicy</code></td>
+            <td>大模型 API 偶发超时、限流导致整张图失败</td>
+            <td>配置 <code>max_retries</code>、<code>initial_delay_s</code>、<code>backoff_factor</code> 与 <code>retry_on</code> 异常白名单</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：人工拦截与跨实例恢复</h2>
+    <div class="card">
+      <pre><code>from pathlib import Path
+from zhishu_agent import RetryPolicy, SQLiteCheckpointer, build_writing_agent_graph
+
+cp = SQLiteCheckpointer(Path("checkpoints.db"))
+app = build_writing_agent_graph(
+    checkpointer=cp,
+    max_workers=4,
+    node_retry_policy=RetryPolicy(max_retries=2, initial_delay_s=0.01),
+)
+
+# 1. 启动任务并在 human_approval 前自动暂停
+paused = app.invoke({"topic": "企业级 AI Agent 治理"}, thread_id="book-001")
+assert paused.status == "interrupted"
+
+# 2. 人工修改大纲并注入 approved=True 恢复执行
+completed = app.resume(
+    "book-001",
+    updated_state={
+        "approved": True,
+        "outline": [*paused.state["outline"], "第四章：灰度发布与合规审计"],
+        "human_feedback": "大纲已审阅通过",
+    },
+)
+print(completed.state["final_article"])</code></pre>
+    </div>
+
+    <h2>四、课后思考与自检清单</h2>
+    <div class="card">
+      <details>
+        <summary>点击展开：为什么 resume() 恢复执行时必须跳过首轮 interrupt_before 检查？</summary>
+        <p>当图在节点 <code>human_approval</code> 前暂停时，检查点记录的 <code>next_node</code> 正是 <code>human_approval</code>。如果不跳过首轮拦截，调用 <code>resume()</code> 后图会在同一节点再次触发暂停，导致无限死锁。因此引擎通过 <code>skip_interrupt_on_first=True</code> 放行当前已获批的断点节点。</p>
+      </details>
+      <details>
+        <summary>点击展开：为什么 ParallelSectionRunner 需要按原始 index 重排结果？</summary>
+        <p>多线程并发执行时，各章节耗时受内容复杂度与重试次数影响，完成顺序通常与大纲顺序不一致。按 <code>index</code> 映射收集结果并按 <code>range(len(sections))</code> 输出，才能保证终稿章节顺序 100% 确定。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
