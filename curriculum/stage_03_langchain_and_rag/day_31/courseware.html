@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 31 | 智枢企业级智能体平台 · Week 5 周测与 RAG 调优实验台</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 31 | 版本 v0.3.0-day31</div>
+      <h1>Week 5 周测与 RAG 调优实验台：Hit Rate@K 与 MRR 网格搜索</h1>
+      <p>企业需求驱动（Issue #031）：用量化检索指标替代“拍脑袋调参”，完成第五周 LangChain / LCEL / Memory / RAG 综合测评</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（数据驱动的 RAG 工程）：</strong><br />
+      欢迎来到 Day 31！过去一周我们搭建了 LangChain 多模型网关、LCEL 管道、多会话记忆隔离、文档切分与本地向量库。在生产上线前，最后也是最关键的一步是<strong>量化评估与超参数调优</strong>：通过 <code>TuningConfig</code> 与 <code>run_grid_experiment</code>，我们用 <strong>Hit Rate@K</strong> 和 <strong>MRR</strong> 精准锁定最优的 <code>chunk_size</code>、<code>chunk_overlap</code> 与 <code>top_k</code>！
+    </div>
+
+    <h2>一、RAG 超参数网格实验流水线</h2>
+    <div class="card">
+      <p>网格实验台（<code>rag_tuner.py</code>）自动遍历多组切分与检索参数，完成端到端指标评估：</p>
+      <div class="mermaid">
+        flowchart TD
+          A["Corpus 语料 + EvalQAPairs 评测集"] --> B["TuningConfig(chunk_size, overlap, top_k)"]
+          B --> C["chunk_text() 滑动窗口切分"]
+          C --> D["LocalEmbedding (SHA-256 + L2 Norm)"]
+          D --> E["Cosine Similarity 检索 Top-K"]
+          E --> F["计算 Hit Rate@K & MRR"]
+          F --> G{"还有下一组配置?"}
+          G -->|"是"| B
+          G -->|"否"| H["输出 GridExperimentReport 锁定最优配置"]
+      </div>
+    </div>
+
+    <h2>二、核心评估指标与超参权衡</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>指标 / 参数</th><th>工程含义</th><th>调优权衡（Trade-off）</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>Hit Rate@K</code></td><td>Top-K 召回结果中包含至少 1 个相关切片的查询占比</td><td>衡量“找不找得到”，随 <code>top_k</code> 增大单调不降，但会增加 Token 成本</td></tr>
+          <tr><td><code>MRR</code></td><td>首个相关切片排名倒数（<code>1/rank</code>）的均值</td><td>衡量“排得够不够靠前”，有效防止大模型出现 Lost in the Middle</td></tr>
+          <tr><td><code>chunk_size</code></td><td>单个文本切片最大字符数</td><td>过小易割裂语义，过大则引入无关噪声稀释相似度</td></tr>
+          <tr><td><code>chunk_overlap</code></td><td>相邻切片的重叠字符数</td><td>防止关键事实跨边界被腰斩，通常设为 <code>chunk_size</code> 的 10%~25%</td></tr>
+        </tbody>
+      </table>
+
+      <h3>核心调用示例</h3>
+      <pre><code>from zhishu_agent import EvalQAPair, TuningConfig, run_grid_experiment
+
+configs = [
+    TuningConfig(chunk_size=30, chunk_overlap=0, top_k=1),
+    TuningConfig(chunk_size=80, chunk_overlap=20, top_k=2),
+    TuningConfig(chunk_size=120, chunk_overlap=20, top_k=3),
+]
+
+report = run_grid_experiment(corpus=corpus, eval_qa_pairs=eval_qa_pairs, configs=configs)
+print(report.summary_table())
+print("最优配置:", report.best_config)</code></pre>
+    </div>
+
+    <h2>三、Week 5 综合测评与本地自动化验收</h2>
+    <div class="card">
+      <p>请完成 <code>docs/weekly_quiz_and_answers.md</code> 中的 10 道选择题与 2 道实战编程题，并使用以下命令运行实验台与自动化校验：</p>
+      <pre><code># 1. 运行 Day 31 RAG 网格调优实验台
+.venv/bin/python project_iterations/day_31/main.py
+
+# 2. 一键执行 Day 31 Notebook 与 pytest 单元测试
+.venv/bin/python scripts/verify_day.py \
+  --nb curriculum/stage_03_langchain_and_rag/day_31/notebook.ipynb \
+  --iter project_iterations/day_31</code></pre>
+      <details>
+        <summary>点击查看：为什么 Hit Rate@K 相同时要优先看 MRR？</summary>
+        <p>假设配置 A 与配置 B 的 Hit Rate@3 都是 100%，但配置 A 把正确答案排在第 1 位（MRR=1.0），配置 B 把正确答案排在第 3 位（MRR=0.33）。大语言模型对上下文中间/靠后位置的注意力往往较弱（Lost in the Middle），因此 MRR 越高，最终生成答案的准确率也越稳定。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
