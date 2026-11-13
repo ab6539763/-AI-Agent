@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 37 | 智枢企业级智能体平台 · 里程碑项目 2 Part 2：全栈知识库问答系统</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 37 | 版本 v0.3.0-day37</div>
+      <h1>里程碑项目 2 Part 2：全栈企业级知识库问答系统</h1>
+      <p>企业需求驱动（Issue #037）：FastAPI + CORSMiddleware + SSE 流式推送（token &amp; citations）+ SQLite 多轮历史 + 可点击引用卡片前端</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从“RAG 引擎”到“可交付的企业产品”）：</strong><br />
+      欢迎来到 Day 37！今天我们把第三阶段沉淀的知识库检索能力全面产品化：后端通过 FastAPI 暴露文档上传、SSE 流式问答与历史查询接口，前端基于原生 <code>fetch()</code> + <code>ReadableStream</code> 实时渲染打字机回答，并在流尾接收 <code>citations</code> 事件生成可点击溯源的引用卡片（Citation Cards）！
+    </div>
+
+    <h2>一、全栈 SSE 流式问答与引用溯源时序图</h2>
+    <div class="card">
+      <div class="mermaid">
+        sequenceDiagram
+          autonumber
+          actor User as 企业员工
+          participant UI as 前端 (index.html)
+          participant API as FastAPI (kb_web_app.py)
+          participant KB as 知识库 (kb_service.py)
+          participant DB as SQLite (KBDatabase)
+
+          User->>UI: 上传文档 (filename, content)
+          UI->>API: POST /api/v1/kb/upload
+          API->>KB: ingest_document() 分块索引
+          API->>DB: save_document() 持久化原文
+          API-->>UI: 200 OK
+
+          User->>UI: 发送知识库提问
+          UI->>API: POST /api/v1/kb/chat/stream
+          API->>DB: get_history() &amp; save_message("user")
+          API->>KB: answer_question(query, history)
+          KB-->>API: KBQueryResult(answer, citations)
+
+          loop 逐块推送 Token
+            API-->>UI: data: {"type": "token", "content": "..."}
+          end
+          API-->>UI: data: {"type": "citations", "citations": [...]}
+          API->>DB: save_message("assistant", answer, citations)
+          API-->>UI: data: {"type": "done", "message_id": id}
+      </div>
+    </div>
+
+    <h2>二、核心 REST &amp; SSE 接口契约</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>方法与路径</th>
+            <th>核心职责</th>
+            <th>请求 / 响应要点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>GET /</code></td>
+            <td>托管全栈单页前端</td>
+            <td>返回 <code>frontend/index.html</code>（含上传面板、会话侧边栏、引用弹窗）</td>
+          </tr>
+          <tr>
+            <td><code>POST /api/v1/kb/upload</code></td>
+            <td>上传并索引知识库文档</td>
+            <td>接收 <code>{filename, content}</code>，分块索引并落盘 SQLite <code>kb_documents</code></td>
+          </tr>
+          <tr>
+            <td><code>POST /api/v1/kb/chat/stream</code></td>
+            <td>SSE 流式知识库问答</td>
+            <td>依次推送 <code>token</code>、<code>citations</code>、<code>done</code> 事件并保存对话与引用至 SQLite</td>
+          </tr>
+          <tr>
+            <td><code>GET /api/v1/kb/sessions/{id}/history</code></td>
+            <td>查询多轮会话与引用历史</td>
+            <td>返回消息列表，每条助手回复均附带 <code>citations</code> 数组用于前端还原卡片</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、SSE 前端消费与引用卡片实战</h2>
+    <div class="card">
+      <h3>1. 为什么用 <code>fetch() + ReadableStream</code> 消费 SSE？</h3>
+      <p>浏览器原生 <code>EventSource</code> 仅支持 <code>GET</code> 请求，无法携带 JSON 请求体。通过 <code>fetch()</code> 发起 <code>POST</code> 请求并读取 <code>response.body.getReader()</code>，即可按 <code>\n\n</code> 分帧解析 <code>token</code> 与 <code>citations</code>：</p>
+      <pre><code>const reader = response.body.getReader();
+const decoder = new TextDecoder("utf-8");
+let buffer = "";
+
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  buffer += decoder.decode(value, { stream: true });
+  const blocks = buffer.split("\n\n");
+  buffer = blocks.pop() || "";
+  for (const block of blocks) {
+    if (!block.trim().startsWith("data: ")) continue;
+    const evt = JSON.parse(block.trim().slice(6));
+    if (evt.type === "token") textSpan.textContent += evt.content;
+    if (evt.type === "citations") renderCitationCards(div, evt.citations);
+  }
+}</code></pre>
+    </div>
+
+    <h2>四、随堂思考与课后自测</h2>
+    <div class="card">
+      <p><strong>思考题 1：</strong> 如果用户上传文档后重启了 FastAPI 服务，之前上传的文档和历史对话里的引用卡片会丢失吗？</p>
+      <details>
+        <summary>点击查看参考答案</summary>
+        <p>不会丢失。<code>KBDatabase</code> 将文档原文持久化在 <code>kb_documents</code> 表，将引用列表以 JSON 格式持久化在 <code>messages.citations_json</code> 字段。<code>create_app()</code> 启动时会自动调用 <code>db.load_documents()</code> 重建知识库索引。</p>
+      </details>
+
+      <p style="margin-top:16px;"><strong>思考题 2：</strong> 如何验证 <code>TestClient</code> 收到的 SSE 流既包含逐字 <code>token</code>，又包含可溯源的 <code>citations</code>？</p>
+      <details>
+        <summary>点击查看参考答案</summary>
+        <p>使用 <code>with client.stream("POST", "/api/v1/kb/chat/stream", json=...) as resp:</code> 读取 <code>resp.iter_text()</code>，按 <code>\n\n</code> 切分后解析 <code>data: </code> 前缀的 JSON，分别过滤 <code>type == "token"</code> 与 <code>type == "citations"</code> 即可完成端到端断言。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>

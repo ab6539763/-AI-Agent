@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>智枢企业级知识库问答平台 · v0.3.0-day37</title>
+  <style>
+    :root {
+      --bg: #0b1120;
+      --sidebar: #111827;
+      --panel: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-2: #6366f1;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      overflow: hidden;
+    }
+    .sidebar {
+      width: 340px;
+      background: var(--sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      gap: 16px;
+      overflow-y: auto;
+    }
+    .brand {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 14px 16px;
+      border-radius: 12px;
+    }
+    .brand h1 { margin: 0; font-size: 16px; }
+    .brand p { margin: 4px 0 0; font-size: 12px; opacity: 0.9; }
+    .section-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--accent);
+      margin: 0 0 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    input[type="text"], textarea {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      margin-bottom: 8px;
+    }
+    textarea { resize: vertical; min-height: 76px; }
+    .btn {
+      background: linear-gradient(135deg, #0ea5e9, #6366f1);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-ghost {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 5px 10px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .doc-list, .session-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 150px;
+      overflow-y: auto;
+      margin-top: 8px;
+    }
+    .list-item {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: pointer;
+    }
+    .list-item.active { border-color: var(--accent); background: rgba(56, 189, 248, 0.1); }
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+    .topbar {
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(17, 24, 39, 0.7);
+    }
+    .chat-box {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .msg {
+      max-width: 82%;
+      padding: 14px 18px;
+      border-radius: 14px;
+      line-height: 1.65;
+      font-size: 14px;
+      white-space: pre-wrap;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: linear-gradient(135deg, #0284c7, #4f46e5);
+      color: #fff;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+    .citations-wrap {
+      margin-top: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .citation-card {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--green);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: border-color 0.2s, transform 0.15s;
+      max-width: 260px;
+    }
+    .citation-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    .citation-card .cite-title {
+      font-weight: 600;
+      color: var(--green);
+      margin-bottom: 3px;
+    }
+    .citation-card .cite-preview {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .composer {
+      padding: 16px 24px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 12px;
+      background: var(--sidebar);
+    }
+    .composer input { margin: 0; flex: 1; }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.75);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      width: 560px;
+      max-width: 92vw;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 24px;
+    }
+    .modal h3 { margin: 0 0 8px; color: var(--accent); }
+    .modal pre {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      white-space: pre-wrap;
+      font-size: 13px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>智枢企业知识库问答</h1>
+      <p>v0.3.0-day37 · FastAPI + SSE + Citation Cards</p>
+    </div>
+
+    <div class="section-card">
+      <div class="section-title">
+        <span>📄 知识库文档上传</span>
+        <span id="docCount" style="color: var(--green);">0 份</span>
+      </div>
+      <input type="file" id="fileInput" accept=".txt,.md,.csv,.json" style="margin-bottom:8px;font-size:12px;" />
+      <input type="text" id="docFilename" placeholder="文件名，例如：hr_policy.md" />
+      <textarea id="docContent" placeholder="粘贴或通过上方选择文档内容..."></textarea>
+      <button class="btn" id="uploadBtn" style="width:100%;">上传并索引文档</button>
+      <div id="uploadStatus" style="font-size:12px;color:var(--muted);margin-top:6px;"></div>
+      <div class="doc-list" id="docList"></div>
+    </div>
+
+    <div class="section-card" style="flex:1;display:flex;flex-direction:column;">
+      <div class="section-title">
+        <span>💬 多轮会话历史</span>
+        <button class="btn-ghost" id="newSessionBtn">+ 新会话</button>
+      </div>
+      <div class="session-list" id="sessionList" style="max-height:none;flex:1;"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <strong id="sessionBadge">当前会话：default-kb-session</strong>
+        <span style="font-size:12px;color:var(--muted);margin-left:10px;">SSE 实时流式推送 · 点击引用卡片可溯源原文</span>
+      </div>
+      <span style="font-size:12px;color:var(--green);">● 在线就绪</span>
+    </header>
+
+    <section class="chat-box" id="chatBox"></section>
+
+    <form class="composer" id="chatForm">
+      <input type="text" id="questionInput" placeholder="输入企业知识库问题，例如：年假几天？报销标准是什么？" autocomplete="off" />
+      <button class="btn" type="submit" id="sendBtn">发送提问</button>
+    </form>
+  </main>
+
+  <div class="modal-backdrop" id="citationModal">
+    <div class="modal">
+      <h3 id="modalTitle">引用原文详情</h3>
+      <p id="modalMeta" style="font-size:12px;color:var(--muted);margin:0 0 10px;"></p>
+      <pre id="modalSnippet"></pre>
+      <div style="text-align:right;margin-top:12px;">
+        <button class="btn-ghost" id="closeModalBtn">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentSessionId = "kb-session-" + Date.now().toString(36);
+
+    const chatBox = document.getElementById("chatBox");
+    const sessionBadge = document.getElementById("sessionBadge");
+    const docList = document.getElementById("docList");
+    const docCount = document.getElementById("docCount");
+    const sessionList = document.getElementById("sessionList");
+    const citationModal = document.getElementById("citationModal");
+
+    function updateSessionBadge() {
+      sessionBadge.textContent = "当前会话：" + currentSessionId;
+    }
+
+    function openCitationModal(cite) {
+      document.getElementById("modalTitle").textContent = "📄 " + cite.filename;
+      document.getElementById("modalMeta").textContent =
+        `片段 ID: ${cite.chunk_id} | 匹配度: ${(cite.score * 100).toFixed(1)}%`;
+      document.getElementById("modalSnippet").textContent = cite.snippet;
+      citationModal.classList.add("open");
+    }
+
+    document.getElementById("closeModalBtn").onclick = () => {
+      citationModal.classList.remove("open");
+    };
+    citationModal.onclick = (e) => {
+      if (e.target === citationModal) citationModal.classList.remove("open");
+    };
+
+    function renderCitationCards(container, citations) {
+      if (!citations || citations.length === 0) return;
+      const wrap = document.createElement("div");
+      wrap.className = "citations-wrap";
+      citations.forEach((cite, idx) => {
+        const card = document.createElement("div");
+        card.className = "citation-card";
+        card.innerHTML = `
+          <div class="cite-title">[${idx + 1}] ${cite.filename} (${(cite.score * 100).toFixed(0)}%)</div>
+          <div class="cite-preview">${cite.snippet.replace(/</g, "&lt;")}</div>
+        `;
+        card.onclick = () => openCitationModal(cite);
+        wrap.appendChild(card);
+      });
+      container.appendChild(wrap);
+    }
+
+    function appendMessage(role, content, citations = []) {
+      const div = document.createElement("div");
+      div.className = `msg ${role}`;
+      const textSpan = document.createElement("div");
+      textSpan.textContent = content;
+      div.appendChild(textSpan);
+      if (role === "assistant" && citations.length > 0) {
+        renderCitationCards(div, citations);
+      }
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+      return { div, textSpan };
+    }
+
+    async function loadDocuments() {
+      const res = await fetch("/api/v1/kb/documents");
+      const data = await res.json();
+      docCount.textContent = `${data.documents.length} 份`;
+      docList.innerHTML = "";
+      data.documents.forEach((doc) => {
+        const item = document.createElement("div");
+        item.className = "list-item";
+        item.innerHTML = `<span>${doc.filename}</span><span style="color:var(--muted)">${doc.chunk_count} 块</span>`;
+        docList.appendChild(item);
+      });
+    }
+
+    async function loadSessions() {
+      const res = await fetch("/api/v1/kb/sessions");
+      const data = await res.json();
+      sessionList.innerHTML = "";
+      data.sessions.forEach((s) => {
+        const item = document.createElement("div");
+        item.className = "list-item" + (s.session_id === currentSessionId ? " active" : "");
+        item.innerHTML = `<span>${s.title}</span><span style="color:var(--muted)">${s.message_count} 条</span>`;
+        item.onclick = () => switchSession(s.session_id);
+        sessionList.appendChild(item);
+      });
+    }
+
+    async function switchSession(sessionId) {
+      currentSessionId = sessionId;
+      updateSessionBadge();
+      chatBox.innerHTML = "";
+      const res = await fetch(`/api/v1/kb/sessions/${encodeURIComponent(sessionId)}/history`);
+      const data = await res.json();
+      data.messages.forEach((m) => appendMessage(m.role, m.content, m.citations || []));
+      loadSessions();
+    }
+
+    document.getElementById("newSessionBtn").onclick = () => {
+      currentSessionId = "kb-session-" + Date.now().toString(36);
+      updateSessionBadge();
+      chatBox.innerHTML = "";
+      loadSessions();
+    };
+
+    document.getElementById("fileInput").onchange = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      document.getElementById("docFilename").value = file.name;
+      const reader = new FileReader();
+      reader.onload = () => {
+        document.getElementById("docContent").value = reader.result;
+      };
+      reader.readAsText(file, "utf-8");
+    };
+
+    document.getElementById("uploadBtn").onclick = async () => {
+      const filename = document.getElementById("docFilename").value.trim();
+      const content = document.getElementById("docContent").value.trim();
+      const statusEl = document.getElementById("uploadStatus");
+      if (!filename || !content) {
+        statusEl.textContent = "请填写文件名与文档内容。";
+        return;
+      }
+      const res = await fetch("/api/v1/kb/upload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename, content }),
+      });
+      if (!res.ok) {
+        statusEl.textContent = "上传失败，请检查输入。";
+        return;
+      }
+      const data = await res.json();
+      statusEl.textContent = `✅ 已索引《${data.document.filename}》（${data.document.chunk_count} 个分块）`;
+      document.getElementById("docContent").value = "";
+      loadDocuments();
+    };
+
+    document.getElementById("chatForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const input = document.getElementById("questionInput");
+      const question = input.value.trim();
+      if (!question) return;
+
+      input.value = "";
+      appendMessage("user", question);
+      const { div, textSpan } = appendMessage("assistant", "");
+
+      const sendBtn = document.getElementById("sendBtn");
+      sendBtn.disabled = true;
+
+      try {
+        const response = await fetch("/api/v1/kb/chat/stream", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            session_id: currentSessionId,
+            message: question,
+            top_k: 3,
+            delay_ms: 12,
+          }),
+        });
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || "";
+
+          for (const block of lines) {
+            const line = block.trim();
+            if (!line.startsWith("data: ")) continue;
+            const payload = JSON.parse(line.slice(6));
+            if (payload.type === "token") {
+              textSpan.textContent += payload.content;
+              chatBox.scrollTop = chatBox.scrollHeight;
+            } else if (payload.type === "citations") {
+              renderCitationCards(div, payload.citations);
+              chatBox.scrollTop = chatBox.scrollHeight;
+            }
+          }
+        }
+      } finally {
+        sendBtn.disabled = false;
+        loadSessions();
+      }
+    };
+
+    updateSessionBadge();
+    loadDocuments();
+    loadSessions();
+  </script>
+</body>
+</html>
