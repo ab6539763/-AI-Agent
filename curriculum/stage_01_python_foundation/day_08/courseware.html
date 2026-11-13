@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 08 | 智枢企业级智能体平台 · 面向对象编程（OOP Part 1）</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第一阶段：Python 编程基础 · 第 2 周 · Day 08 | 版本 v0.1.0-day08</div>
+      <h1>面向对象编程（OOP Part 1）：用 <code>ChatMessage</code> 重构对话消息</h1>
+      <p>企业需求驱动：星辰数科《智枢企业级智能体平台》架构升级 —— 告别散装裸字典，落地强校验、可序列化、自带 Token 估算的消息实体类</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（上下文解读）：</strong><br />
+      各位同学好，欢迎来到第 8 天！在 Day 05 我们用 <code>{"role": "user", "content": "..."}</code> 这样的裸字典跑通了 JSON 解析，但真正进入企业级 Agent 研发后，裸字典很快会变成“维护噩梦”：拼错 <code>"usr"</code> 不会报错、无法自带 Token 估算逻辑、多人协作时字段格式全靠口头约定。今天上午我们彻底搞懂 Python 类的三大核心机制（<strong>实例方法 <code>self</code>、类方法 <code>@classmethod</code>、静态方法 <code>@staticmethod</code></strong>）；下午在智枢平台落地 <code>zhishu_agent/message.py</code> 中的 <code>ChatMessage</code> 类！
+    </div>
+
+    <h2>一、上午：为什么从裸字典升级到面向对象（OOP）？</h2>
+    <div class="card">
+      <p>在大型智能体平台中，一条对话消息不仅有静态数据（<code>role</code>、<code>content</code>、<code>name</code>），还有内聚的业务行为（角色合法性校验、API 字典序列化、Token 消耗估算）。面向对象编程（OOP）的核心价值在于<strong>数据与行为的封装</strong>以及<strong>Fail-Fast（快速失败）</strong>：</p>
+      <ul>
+        <li><strong>封装（Encapsulation）</strong>：将字段校验逻辑收敛在 <code>__init__</code> 中，非法角色在构造瞬间直接抛出 <code>ValueError</code>，绝不流入下游大模型接口。</li>
+        <li><strong>三种方法分工明确</strong>：<code>to_dict(self)</code> 与 <code>estimate_tokens(self)</code> 操作实例状态；<code>from_dict(cls, data)</code> 负责从外部字典工厂构造实例；<code>is_valid_role(role)</code> 作为无状态静态校验器。</li>
+      </ul>
+    </div>
+
+    <h2>二、下午：GitLab Issue #008 与 UML 类图设计</h2>
+    <div class="card">
+      <p><strong>GitLab Issue #008（Tech Lead 张工 提出）：</strong>为智枢平台新增 <code>zhishu_agent/message.py</code>，提供标准化的 <code>ChatMessage</code> 实体类，并与 Day 05 的 <code>json_parser</code> 协同完成会话持久化往返。</p>
+      <div class="mermaid">
+        classDiagram
+          class ChatMessage {
+            +tuple~str~ VALID_ROLES = ("system", "user", "assistant", "tool")
+            +str role
+            +str content
+            +str | None name
+            +__init__(role: str, content: str, name: str | None = None) None
+            +to_dict() dict~str, Any~
+            +estimate_tokens() int
+            +from_dict(data: dict~str, Any~) ChatMessage$
+            +is_valid_role(role: str) bool$
+            +__repr__() str
+            +__eq__(other: object) bool
+          }
+
+          class json_parser {
+            &lt;&lt;module&gt;&gt;
+            +save_session_json(filepath, messages) None
+            +load_session_json(filepath) list~dict~
+          }
+
+          ChatMessage ..&gt; json_parser : "to_dict() / from_dict() 协同持久化"
+      </div>
+    </div>
+
+    <h2>三、下午实操：核心代码逐行解析（可直接粘贴运行）</h2>
+    <div class="card">
+      <p>以下代码对应仓库中的 <code>project_iterations/day_08/zhishu_agent/message.py</code>：</p>
+      <pre><code>from typing import Any
+
+
+class ChatMessage:
+    """大模型标准对话消息实体类。"""
+
+    VALID_ROLES: tuple[str, ...] = ("system", "user", "assistant", "tool")
+
+    def __init__(self, role: str, content: str, name: str | None = None) -&gt; None:
+        if not self.is_valid_role(role):
+            allowed = ", ".join(self.VALID_ROLES)
+            raise ValueError(f"无效的消息角色: {role!r}，合法角色仅限: {allowed}")
+
+        if not isinstance(content, str):
+            raise TypeError(f"消息内容 content 必须为 str，实际收到: {type(content).__name__}")
+
+        if name is not None and not isinstance(name, str):
+            raise TypeError(f"可选字段 name 必须为 str 或 None，实际收到: {type(name).__name__}")
+
+        self.role: str = role
+        self.content: str = content
+        self.name: str | None = name
+
+    def to_dict(self) -&gt; dict[str, Any]:
+        """实例方法：将 ChatMessage 序列化为 OpenAI / DeepSeek API 兼容字典。"""
+        payload: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.name is not None:
+            payload["name"] = self.name
+        return payload
+
+    def estimate_tokens(self) -&gt; int:
+        """实例方法：启发式估算当前消息文本的 Token 消耗量。"""
+        if not self.content:
+            return 0
+        cjk_count = sum(1 for ch in self.content if "\u4e00" &lt;= ch &lt;= "\u9fff")
+        other_count = len(self.content) - cjk_count
+        return max(1, round(cjk_count * 1.5 + other_count * 0.3))
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -&gt; "ChatMessage":
+        """类方法（工厂方法）：从字典反序列化构造 ChatMessage 实例。"""
+        if not isinstance(data, dict):
+            raise ValueError("from_dict 参数必须为 dict 类型")
+        if "role" not in data or "content" not in data:
+            raise ValueError("消息字典必须包含 'role' 和 'content' 字段")
+        return cls(role=data["role"], content=data["content"], name=data.get("name"))
+
+    @staticmethod
+    def is_valid_role(role: str) -&gt; bool:
+        """静态方法：无需实例化即可校验角色字符串是否合法。"""
+        return isinstance(role, str) and role in ChatMessage.VALID_ROLES
+
+    def __repr__(self) -&gt; str:
+        name_part = f", name={self.name!r}" if self.name is not None else ""
+        return f"ChatMessage(role={self.role!r}, content={self.content!r}{name_part})"
+
+    def __eq__(self, other: object) -&gt; bool:
+        if not isinstance(other, ChatMessage):
+            return NotImplemented
+        return self.role == other.role and self.content == other.content and self.name == other.name
+
+
+if __name__ == "__main__":
+    print("静态校验 'user':", ChatMessage.is_valid_role("user"))
+    print("静态校验 'admin':", ChatMessage.is_valid_role("admin"))
+
+    msg = ChatMessage(role="user", content="请总结智枢平台 Day 08 架构升级。", name="chenmo")
+    print("实例表示:", repr(msg))
+    print("API 字典:", msg.to_dict())
+    print("预估 Token:", msg.estimate_tokens())
+
+    restored = ChatMessage.from_dict(msg.to_dict())
+    assert restored == msg
+    print("from_dict 往返还原验证通过！")</code></pre>
+    </div>
+
+    <h2>四、课堂笔记：OOP 三类方法与魔术方法速查表</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr><th>语法特性</th><th>装饰器 / 第一个参数</th><th>在 <code>ChatMessage</code> 中的职责</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>构造函数 <code>__init__</code></td><td><code>self</code></td><td>接收 <code>role / content / name</code> 并执行 Fail-Fast 合法性校验</td></tr>
+          <tr><td>实例方法</td><td>无装饰器 / <code>self</code></td><td><code>to_dict()</code> 导出字典、<code>estimate_tokens()</code> 估算文本 Token</td></tr>
+          <tr><td>类方法</td><td><code>@classmethod</code> / <code>cls</code></td><td><code>from_dict(cls, data)</code> 从 JSON 字典工厂构造对象实例</td></tr>
+          <tr><td>静态方法</td><td><code>@staticmethod</code> / 无隐式参数</td><td><code>is_valid_role(role)</code> 纯工具校验，无需实例化即可调用</td></tr>
+          <tr><td>魔术方法</td><td><code>__repr__</code> / <code>__eq__</code></td><td>提供可读日志输出与基于字段值的对象相等性比较</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>五、课后作业与参考答案</h2>
+    <div class="card">
+      <p><strong>作业 1（容器类）：</strong>编写 <code>Conversation</code> 类，维护 <code>list[ChatMessage]</code>，实现 <code>add_message()</code>、<code>total_tokens()</code> 与 <code>to_dict_list()</code>。</p>
+      <p><strong>作业 2（<code>@classmethod</code> 工厂）：</strong>为 <code>ChatMessage</code> 扩展 <code>system()</code>、<code>user()</code>、<code>assistant()</code> 三个快捷工厂类方法。</p>
+      <p><strong>作业 3（<code>@staticmethod</code> 校验器）：</strong>编写 <code>MessageValidator</code> 工具类，提供 <code>is_non_empty_content()</code>、<code>is_within_length()</code> 与 <code>validate_payload()</code> 静态方法。</p>
+      <details>
+        <summary>点击展开完整参考答案（含 3 道作业可执行代码）</summary>
+        <pre><code># 作业 1 参考答案：Conversation 容器类
+class Conversation:
+    def __init__(self, system_prompt: str | None = None) -&gt; None:
+        self.messages: list[ChatMessage] = []
+        if system_prompt is not None:
+            self.messages.append(ChatMessage(role="system", content=system_prompt))
+
+    def add_message(self, message: ChatMessage) -&gt; None:
+        if not isinstance(message, ChatMessage):
+            raise TypeError(f"必须传入 ChatMessage 实例，实际收到: {type(message).__name__}")
+        self.messages.append(message)
+
+    def total_tokens(self) -&gt; int:
+        return sum(msg.estimate_tokens() for msg in self.messages)
+
+    def to_dict_list(self) -&gt; list[dict]:
+        return [msg.to_dict() for msg in self.messages]
+
+
+# 作业 2 参考答案：@classmethod 快捷工厂方法
+class ExtendedChatMessage(ChatMessage):
+    @classmethod
+    def system(cls, content: str) -&gt; "ExtendedChatMessage":
+        return cls(role="system", content=content)
+
+    @classmethod
+    def user(cls, content: str, name: str | None = None) -&gt; "ExtendedChatMessage":
+        return cls(role="user", content=content, name=name)
+
+    @classmethod
+    def assistant(cls, content: str) -&gt; "ExtendedChatMessage":
+        return cls(role="assistant", content=content)
+
+
+# 作业 3 参考答案：@staticmethod 合规校验工具类
+class MessageValidator:
+    @staticmethod
+    def is_non_empty_content(content: str) -&gt; bool:
+        return isinstance(content, str) and len(content.strip()) &gt; 0
+
+    @staticmethod
+    def is_within_length(content: str, max_length: int = 4000) -&gt; bool:
+        return isinstance(content, str) and len(content) &lt;= max_length
+
+    @staticmethod
+    def validate_payload(data: dict, max_length: int = 4000) -&gt; bool:
+        if not isinstance(data, dict):
+            return False
+        role = data.get("role")
+        content = data.get("content")
+        return (
+            ChatMessage.is_valid_role(role)
+            and MessageValidator.is_non_empty_content(content)
+            and MessageValidator.is_within_length(content, max_length=max_length)
+        )</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
