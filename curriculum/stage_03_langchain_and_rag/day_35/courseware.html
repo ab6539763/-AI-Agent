@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 35 | 智枢企业级智能体平台 · LlamaIndex 框架与 LangChain 深度对比</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第三阶段：LangChain 与企业级 RAG · Day 35 | 版本 v0.3.0-day35</div>
+      <h1>LlamaIndex 框架核心抽象与 LangChain 深度对比</h1>
+      <p>企业需求驱动（Issue #035）：掌握 <code>SimpleDirectoryReader</code>、<code>Node</code>、<code>VectorStoreIndex</code>、<code>QueryEngine</code>、<code>ChatEngine</code> 与生产级混合架构选型</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（数据框架 vs 编排框架）：</strong><br />
+      欢迎来到第三阶段收官之战 Day 35！如果说 <strong>LangChain</strong> 是连接大模型与外部工具的“万能工作流编排胶水”，那么 <strong>LlamaIndex</strong> 就是专为企业私有数据打造的“精密知识索引引擎”。今天我们不仅要动手实现 LlamaIndex 的五大核心抽象，更要从架构师视角厘清二者的边界与融合之道！
+    </div>
+
+    <h2>一、LlamaIndex vs LangChain 架构对比全景</h2>
+    <div class="card">
+      <p>LlamaIndex 以 <code>Document → Node → VectorStoreIndex → QueryEngine / ChatEngine</code> 为核心数据流，并可作为检索工具无缝嵌入 LangChain/LangGraph 编排层：</p>
+      <div class="mermaid">
+        flowchart LR
+          subgraph LC["LangChain / LangGraph（通用编排层）"]
+            LC1["DocumentLoader + TextSplitter"] --> LC2["Retriever + LCEL"]
+            LC2 --> LC3["StateGraph / AgentExecutor"]
+          end
+          subgraph LI["LlamaIndex（数据索引层）"]
+            LI1["SimpleDirectoryReader"] --> LI2["Node (SOURCE/PREV/NEXT)"]
+            LI2 --> LI3["VectorStoreIndex.from_documents()"]
+            LI3 --> LI4["QueryEngine (单轮)"]
+            LI3 --> LI5["ChatEngine (多轮)"]
+          end
+          LI4 -.->|"封装为 Tool"| LC3
+      </div>
+    </div>
+
+    <h2>二、LangChain 与 LlamaIndex 五维对比矩阵</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>对比维度</th>
+            <th>LangChain / LangGraph</th>
+            <th>LlamaIndex</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>核心定位</strong></td>
+            <td>通用 LLM 应用与复杂 Agent 编排框架</td>
+            <td>以数据为中心的 RAG 与知识索引框架</td>
+          </tr>
+          <tr>
+            <td><strong>核心抽象</strong></td>
+            <td><code>Runnable</code>、<code>Chain</code>、<code>Tool</code>、<code>StateGraph</code></td>
+            <td><code>Document</code>、<code>Node</code>、<code>VectorStoreIndex</code>、<code>QueryEngine</code></td>
+          </tr>
+          <tr>
+            <td><strong>数据接入</strong></td>
+            <td>需手动串联 Loader + Splitter + VectorStore</td>
+            <td><code>SimpleDirectoryReader</code> + <code>from_documents()</code> 一键索引</td>
+          </tr>
+          <tr>
+            <td><strong>问答与合成</strong></td>
+            <td>需自行设计 Prompt 与上下文压缩链</td>
+            <td>内置 <code>compact</code> / <code>refine</code> / <code>tree_summarize</code> 与多轮改写</td>
+          </tr>
+          <tr>
+            <td><strong>最佳实践</strong></td>
+            <td>复杂多步工作流、多工具调用、HITL 人工审批</td>
+            <td>海量私有文档检索、层次索引、高阶 RAG 底座</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、核心代码实战：从目录加载到多轮对话</h2>
+    <div class="card">
+      <pre><code>from zhishu_agent import SimpleDirectoryReader, VectorStoreIndex, compare_frameworks
+
+# 1. 一键加载目录并构建索引
+docs = SimpleDirectoryReader("./enterprise_kb").load_data()
+index = VectorStoreIndex.from_documents(docs, chunk_size=200, chunk_overlap=40)
+
+# 2. QueryEngine：无状态单轮精准问答
+query_engine = index.as_query_engine(similarity_top_k=3, response_mode="compact")
+print(query_engine.query("生产环境 Redis 集群禁止执行什么命令？").response)
+
+# 3. ChatEngine：有状态多轮对话（自动改写指代词）
+chat_engine = index.as_chat_engine(similarity_top_k=3)
+print(chat_engine.chat("入职满1年员工有多少天年假？").response)
+print(chat_engine.chat("申请它需要提前几天？").response)
+
+# 4. 架构选型建议
+print(compare_frameworks(use_case="hybrid")["recommendation"])</code></pre>
+    </div>
+
+    <h2>四、课后思考与练习</h2>
+    <div class="card">
+      <p><strong>思考 1：</strong>LlamaIndex 为什么要把 <code>Document</code> 进一步切分为带 <code>SOURCE / PREVIOUS / NEXT</code> 关系的 <code>Node</code>，而不是直接存纯文本列表？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>当检索器命中某一个细粒度切片（<code>Node</code>）时，往往存在“上下文被截断”的问题。通过维护 <code>PREVIOUS</code> 和 <code>NEXT</code> 节点指针，系统可以在检索后自动扩展相邻上下文（Sentence Window / Small-to-Big Retrieval），既保证了向量匹配的精准度，又保证了送入大模型上下文的完整性。</p>
+      </details>
+
+      <p style="margin-top: 16px;"><strong>思考 2：</strong>在企业级智能体项目中，什么时候应该选择“LlamaIndex + LangGraph 混合架构”？</p>
+      <details>
+        <summary>点击查看解析</summary>
+        <p>当业务既要求<strong>高精度私有知识库检索</strong>（多文档、多格式、复杂溯源），又要求<strong>复杂决策流与外部动作执行</strong>（如查完制度后自动调用 OA/Jira API 提交审批、支持人工中断确认）时，混合架构是最优解：LlamaIndex 负责做“最强的知识大脑”，LangGraph 负责做“最稳的行动中枢”。</p>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
