@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 56 | 智枢企业级智能体平台 · 全栈容器化部署工程与健康检查</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第五阶段：模型微调与私有化部署 · Day 56 | 版本 v0.5.0-day56</div>
+      <h1>容器化部署工程：Dockerfile、Docker Compose 与健康检查打包器</h1>
+      <p>企业需求驱动（Issue #056 · DevOps 赵磊）：实现“多阶段非 root 镜像构建 → 全栈服务编排 → 密钥隔离与 CI 自动化审计”</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（告别“在我电脑上能跑”）：</strong><br />
+      到了企业内网私有化交付现场，稳定性与安全性才是硬道理。今天在 <strong>Day 56</strong>，我们按照 DevOps 赵磊下发的 <strong>Issue #056</strong>，为智枢智能体平台构建生产级多阶段 <code>Dockerfile</code>（Python 3.11-slim + 非 root 用户 + <code>HEALTHCHECK</code>）、编排 <code>zhishu-api + qdrant + redis</code> 的 <code>docker-compose.yml</code>，并打造纯 Python 校验器 <code>deployment_packager.py</code>，在上线前自动拦截一切高危配置！
+    </div>
+
+    <h2>一、全栈容器化部署拓扑架构</h2>
+    <div class="card">
+      <p>生产环境通过 Nginx 统一接入外部流量，后端 FastAPI 容器在隔离的桥接网络 <code>zhishu-net</code> 中协同向量库 Qdrant、SQLite、Redis 与私有化 vLLM 推理服务：</p>
+      <div class="mermaid">
+        flowchart TD
+          CLIENT["企业内网客户端 / 浏览器"] --> NGINX["Nginx 反向代理 (:80 / :443)"]
+          NGINX -->|"proxy_pass :8000"| API["zhishu-api (FastAPI, USER zhishu)"]
+          API -->|"HTTP :6333"| QDRANT["VectorDB: Qdrant (qdrant_storage)"]
+          API -->|"卷挂载 /app/data"| SQLITE["SQLite 状态库 (zhishu_data)"]
+          API -->|"TCP :6379"| REDIS["Redis 缓存/队列 (redis_data)"]
+          API -->|"OpenAI 兼容 :8001/v1"| VLLM["vLLM 私有化推理引擎"]
+      </div>
+    </div>
+
+    <h2>二、生产级 Dockerfile 五大安全基线</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>安全与工程基线</th>
+            <th>实现指令 / 规范</th>
+            <th>核心收益</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>多阶段构建</strong></td>
+            <td><code>FROM python:3.11-slim AS builder</code> → <code>AS runtime</code></td>
+            <td>剥离构建期工具链，仅拷贝 <code>/opt/venv</code>，缩减镜像体积与 CVE 风险</td>
+          </tr>
+          <tr>
+            <td><strong>非 root 运行</strong></td>
+            <td><code>useradd --system --uid 10001 zhishu</code> + <code>USER zhishu</code></td>
+            <td>遵循最小权限原则，防止容器逃逸或越权篡改宿主机挂载文件</td>
+          </tr>
+          <tr>
+            <td><strong>容器健康检查</strong></td>
+            <td><code>HEALTHCHECK --interval=30s ... /health</code></td>
+            <td>实时探测进程存活性，异常时由编排器自动摘除流量或重启</td>
+          </tr>
+          <tr>
+            <td><strong>端口显式声明</strong></td>
+            <td><code>EXPOSE 8000</code></td>
+            <td>明确服务监听边界，便于反向代理与运维监控自动发现</td>
+          </tr>
+          <tr>
+            <td><strong>零硬编码密钥</strong></td>
+            <td>严禁在 <code>ENV</code> / <code>ARG</code> 写入真实凭据</td>
+            <td>避免 <code>docker history</code> 明文泄漏 API Key 或数据库密码</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、Docker Compose 编排与 `.env` 密钥隔离</h2>
+    <div class="card">
+      <p>核心要点：通过 <code>depends_on</code> 结合 <code>condition: service_healthy</code> 消除启动竞争，并通过 <code>.env.example</code> + <code>.env</code> 实现配置与代码仓库彻底解耦。</p>
+      <pre><code>depends_on:
+  qdrant:
+    condition: service_healthy
+  redis:
+    condition: service_healthy</code></pre>
+    </div>
+
+    <h2>四、课后思考与自动化验证</h2>
+    <div class="card">
+      <details>
+        <summary>点击查看：为什么不能把 `.env` 提交到 Git，而只提交 `.env.example`？</summary>
+        <p>Git 历史具有不可变性，一旦真实密钥（如 <code>sk-...</code> 或数据库密码）被提交到仓库，即便后续删除也会永久残留在 commit 历史中。<code>.env.example</code> 仅保留键名与安全占位符，真实凭据在部署机或 CI/CD Secret 中注入。</p>
+      </details>
+      <details>
+        <summary>点击查看：运行 Day 56 审计与校验命令</summary>
+        <pre><code>.venv/bin/python project_iterations/day_56/main.py
+.venv/bin/python scripts/verify_day.py --nb curriculum/stage_05_finetuning_and_deployment/day_56/notebook.ipynb --iter project_iterations/day_56</code></pre>
+      </details>
+    </div>
+  </div>
+  <script>
+    mermaid.initialize({ startOnLoad: true, theme: "default" });
+  </script>
+</body>
+</html>
