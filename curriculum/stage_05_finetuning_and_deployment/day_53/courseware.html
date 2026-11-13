@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Day 53 | 智枢企业级智能体平台 · LLaMA-Factory LoRA 微调实战</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: #334155;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --green: #34d399;
+      --amber: #fbbf24;
+    }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+    }
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 32px 24px 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #0ea5e9 0%, #6366f1 100%);
+      padding: 32px;
+      border-radius: 16px;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      background: rgba(15, 23, 42, 0.35);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 13px;
+      margin-bottom: 10px;
+    }
+    h1 { margin: 6px 0 10px; font-size: 28px; }
+    h2 { color: var(--accent); border-left: 4px solid var(--accent); padding-left: 12px; margin-top: 36px; }
+    h3 { color: var(--green); margin-top: 24px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin: 18px 0;
+    }
+    .narrator {
+      background: rgba(56, 189, 248, 0.08);
+      border-left: 4px solid var(--accent);
+      padding: 16px 20px;
+      border-radius: 0 12px 12px 0;
+      margin: 20px 0;
+    }
+    pre {
+      background: #020617;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      overflow-x: auto;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    code { font-family: "JetBrains Mono", Consolas, monospace; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th, td { border: 1px solid var(--border); padding: 10px 14px; text-align: left; }
+    th { background: #0f172a; color: var(--accent); }
+    .mermaid { background: #ffffff; padding: 16px; border-radius: 10px; margin: 16px 0; }
+    details {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin-top: 10px;
+    }
+    summary { cursor: pointer; color: var(--amber); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="badge">第五阶段：模型微调与私有化部署 · Day 53 | 版本 v0.5.0-day53</div>
+      <h1>LLaMA-Factory LoRA 微调实战：配置生成、参数数学与 Loss 曲线诊断</h1>
+      <p>企业需求驱动（Issue #053）：构建可校验的 LoRA 配置生成器、低秩参数量核算器与过拟合/欠拟合自动诊断工具</p>
+    </div>
+
+    <div class="narrator">
+      <strong>🎙️ 讲师旁白（从 Prompt 调优迈向参数高效微调）：</strong><br />
+      在 Stage 4 我们打造了具备工具调用与多智能体协同能力的系统。然而，当企业需要大模型稳定输出特定行业格式或内化私有业务话术时，<strong>LoRA（Low-Rank Adaptation）</strong> 是性价比最高的技术路径。今天在 <strong>Day 53</strong>，我们用工程化代码把 <strong>LLaMA-Factory YAML 生成、LoRA 参数量数学核算、Effective Batch Size 与 Loss 曲线诊断</strong> 彻底跑通！
+    </div>
+
+    <h2>一、LLaMA-Factory LoRA 微调与诊断流水线</h2>
+    <div class="card">
+      <p>在向 GPU 集群提交训练任务前，先通过 <code>LoRATrainingConfig</code> 做 Pydantic 强校验，再依次完成 YAML 导出、参数显存核算与 Loss 趋势预判。</p>
+      <div class="mermaid">
+        flowchart TD
+          CFG["LoRATrainingConfig (Pydantic 强校验)"] --> YAML["export_llamafactory_yaml: 生成标准 SFT YAML"]
+          CFG --> MATH["count_lora_trainable_params: 核算可训练参数与 FP16 显存"]
+          CFG --> SIM["simulate_training_run: 计算 Effective Batch Size 与步数"]
+          SIM --> DIAG{"Loss 曲线拟合状态诊断"}
+          DIAG -->|"Train/Eval 均高"| UNDER(["underfitting: 增 Epoch / 提 LR"])
+          DIAG -->|"Eval 反弹且 Gap 大"| OVER(["overfitting: 早停 / 降 Epoch / 增 Dropout"])
+          DIAG -->|"Loss 震荡上升"| DIV(["diverging: 降 LR 与 alpha/rank"])
+          DIAG -->|"同步平滑收敛"| HEALTHY(["healthy: 保留 Best Checkpoint"])
+      </div>
+    </div>
+
+    <h2>二、LoRA 核心数学与关键超参解析</h2>
+    <div class="card">
+      <p>对于原权重矩阵 \(W_0 \in \mathbb{R}^{d_{out} \times d_{in}}\)，LoRA 冻结 \(W_0\)，仅训练旁路低秩矩阵 \(A \in \mathbb{R}^{r \times d_{in}}\) 与 \(B \in \mathbb{R}^{d_{out} \times r}\)：</p>
+      <pre><code>W = W_0 + (alpha / r) * (B @ A)
+单层单模块可训练参数量 = r * (d_in + d_out)
+当 d_in = d_out = hidden_size 时，每模块贡献 = 2 * r * hidden_size</code></pre>
+      <table>
+        <thead>
+          <tr>
+            <th>核心参数</th>
+            <th>典型取值</th>
+            <th>工程含义与调优直觉</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>lora_rank (r)</code></td>
+            <td><code>8</code> ~ <code>16</code></td>
+            <td>低秩矩阵的秩；越大表达能力越强，但小数据集上过拟合风险越高</td>
+          </tr>
+          <tr>
+            <td><code>lora_alpha</code></td>
+            <td><code>16</code> ~ <code>32</code></td>
+            <td>缩放因子，通常设为 <code>2 * lora_rank</code>（即 scaling = 2.0）</td>
+          </tr>
+          <tr>
+            <td><code>Effective Batch Size</code></td>
+            <td><code>16</code> ~ <code>64</code></td>
+            <td><code>per_device_train_batch_size × gradient_accumulation_steps × num_gpus</code></td>
+          </tr>
+          <tr>
+            <td><code>learning_rate</code></td>
+            <td><code>1e-4</code> ~ <code>2e-4</code></td>
+            <td>LoRA 学习率通常比全量微调（1e-5 ~ 2e-5）高约一个数量级</td>
+          </tr>
+          <tr>
+            <td><code>template</code></td>
+            <td><code>qwen</code></td>
+            <td>必须与基座模型分词器对话格式严格一致，否则会出现严重乱码或微调失效</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>三、Loss 曲线四态诊断与课后练习</h2>
+    <div class="card">
+      <table>
+        <thead>
+          <tr>
+            <th>诊断状态</th>
+            <th>Train Loss 特征</th>
+            <th>Eval Loss 特征</th>
+            <th>推荐动作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>healthy</code></td>
+            <td>平滑下降并趋于稳定</td>
+            <td>同步下降，与 Train 间隔小</td>
+            <td>保存 Best Eval Checkpoint 用于推理部署</td>
+          </tr>
+          <tr>
+            <td><code>underfitting</code></td>
+            <td>居高不下（&gt; 1.30）</td>
+            <td>同样居高不下</td>
+            <td>增加 <code>num_train_epochs</code>、提高学习率或适当增大 <code>lora_rank</code></td>
+          </tr>
+          <tr>
+            <td><code>overfitting</code></td>
+            <td>持续降到极低</td>
+            <td>先降后升，<code>Eval - Train</code> 拉大</td>
+            <td>启用 Early Stopping、减少 Epoch 或增大数据集/Dropout</td>
+          </tr>
+          <tr>
+            <td><code>diverging</code></td>
+            <td>剧烈震荡或上升</td>
+            <td>同步暴涨</td>
+            <td>大幅降低 <code>learning_rate</code>，检查 <code>alpha / rank</code> 与梯度裁剪</td>
+          </tr>
+        </tbody>
+      </table>
+      <details>
+        <summary>💡 思考题：为什么 4 卡训练时将 per_device_train_batch_size 从 4 降到 2，需要把 gradient_accumulation_steps 翻倍？</summary>
+        <p>因为 <code>Effective Batch Size = per_device_bs × grad_accum × num_gpus</code>。当单卡 micro-batch 减半以节省显存时，必须将梯度累积步数翻倍，才能保证每次参数更新所见到的样本数（梯度方差与学习率匹配基准）完全一致。</p>
+      </details>
+    </div>
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "default" });</script>
+</body>
+</html>
