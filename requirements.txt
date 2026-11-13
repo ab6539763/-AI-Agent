@@ -1,0 +1,19 @@
+# 智枢企业级智能体平台（ZhiShu-Agent）— 项目核心依赖
+# 适用 Python 版本：Python 3.10+（已于 Python 3.11.2 虚拟环境全量验证通过）
+# 安装方式：
+#   pip install -r requirements.txt
+#   或 uv pip install -r requirements.txt
+
+# --- Web 服务与数据校验（FastAPI + Pydantic + HTTPX）---
+fastapi>=0.115.0
+uvicorn>=0.30.0
+pydantic>=2.9.0
+httpx>=0.27.0
+
+# --- 自动化测试（Pytest）---
+pytest>=8.0.0
+
+# --- Jupyter Notebook 交互式实操与内核执行 ---
+nbformat>=5.10.0
+jupyter_client>=8.6.0
+ipykernel>=6.29.0
