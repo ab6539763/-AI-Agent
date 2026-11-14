@@ -15,6 +15,7 @@ from app.api import create_app
 from app.fde_pipeline import LegalFDEPipeline
 from app.llm_wiki import LegalLLMWiki
 from app.ontology import Clause, Contract, LegalOntologyRegistry
+from app.redline_engine import ObligationExtractor, RedlinePlaybookEngine
 
 
 def test_ontology_classification_and_regulation_mapping() -> None:
@@ -367,3 +368,97 @@ def test_fastapi_pending_actions_audit_logs_and_redline_diff(tmp_path: Path) -> 
     event_types = {entry["event_type"] for entry in audit_data["logs"]}
     assert "CONTRACT_REVIEWED" in event_types
     assert "CONTRACT_REDLINE_DIFF" in event_types
+
+
+def test_redline_playbook_engine_fallback_library_and_proposals() -> None:
+    engine = RedlinePlaybookEngine()
+    entries = engine.list_entries()
+    clause_types = {e.clause_type for e in entries}
+    assert {"liability_cap", "indemnification", "ip_ownership", "termination"}.issubset(clause_types)
+
+    std_prop = engine.propose_redline(
+        clause_text="Vendor shall have unlimited liability for all claims.",
+        tier="standard",
+    )
+    assert std_prop.clause_type == "liability_cap"
+    assert std_prop.requires_gc_escalation is True
+    assert "twelve (12) months" in std_prop.proposed_text
+
+    fb_prop = engine.propose_redline(
+        clause_text="Vendor may terminate at sole discretion without notice.",
+        clause_type="termination",
+        tier="fallback",
+    )
+    assert fb_prop.clause_type == "termination"
+    assert fb_prop.position_tier == "fallback"
+    assert "thirty (30) days" in fb_prop.proposed_text
+
+
+def test_obligation_extractor_timeline_deadlines() -> None:
+    extractor = ObligationExtractor()
+    text = (
+        "1. Security Incident\n"
+        "Vendor shall notify Customer within 48 hours of any security incident or data breach.\n\n"
+        "2. Service Levels\n"
+        "Vendor shall maintain 99.9% uptime SLA.\n\n"
+        "3. Renewal & Payment\n"
+        "Agreement shall auto-renew unless Customer provides 30 days prior written notice. "
+        "Customer shall pay invoices net 30."
+    )
+    timeline = extractor.extract_timeline(
+        contract_id="ctr_obl_1",
+        title="Cloud MSA",
+        text=text,
+        effective_date="2026-01-01",
+    )
+    assert timeline.total_obligations >= 4
+    categories = {o.category for o in timeline.obligations}
+    assert "breach_notification" in categories
+    assert "sla" in categories
+    assert "renewal" in categories
+    assert "payment" in categories
+    # Shortest deadline (48 hours) should be sorted first
+    assert timeline.obligations[0].due_hours == 48
+    assert timeline.obligations[0].due_date_iso == "2026-01-03"
+
+
+def test_fastapi_obligations_and_playbook_endpoints(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path)
+    client = TestClient(app)
+
+    pb_resp = client.get("/api/v1/contracts/playbook")
+    assert pb_resp.status_code == 200
+    pb_data = pb_resp.json()
+    assert pb_data["count"] == 4
+    assert set(pb_data["clause_types"]) == {
+        "liability_cap",
+        "indemnification",
+        "ip_ownership",
+        "termination",
+    }
+
+    pb_filtered = client.get("/api/v1/contracts/playbook", params={"clause_type": "ip_ownership"})
+    assert pb_filtered.status_code == 200
+    assert pb_filtered.json()["count"] == 1
+    assert pb_filtered.json()["entries"][0]["clause_type"] == "ip_ownership"
+
+    obl_resp = client.post(
+        "/api/v1/contracts/obligations",
+        json={
+            "contract_id": "ctr_cal_api",
+            "title": "Enterprise DPA",
+            "effective_date": "2026-03-01",
+            "text": (
+                "1. Breach Notice\nVendor shall notify counsel@acme.com within 24 hours of any data breach.\n\n"
+                "2. Termination\nEither party may terminate upon 60 days prior written notice."
+            ),
+        },
+    )
+    assert obl_resp.status_code == 200
+    obl_data = obl_resp.json()
+    assert obl_data["total_obligations"] == 2
+    assert obl_data["pii_masked_count"] == 1
+    assert obl_data["obligations"][0]["due_hours"] == 24
+    assert obl_data["obligations"][1]["due_days"] == 60
+    assert obl_data["obligations"][1]["due_date_iso"] == "2026-04-30"
+

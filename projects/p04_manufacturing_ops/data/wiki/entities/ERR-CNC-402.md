@@ -6,7 +6,7 @@ requires_shutdown: false
 entity_id: ERR-CNC-402
 entity_type: FaultCode
 title: CNC Spindle Elevated Temperature Warning
-updated_at: 2026-11-13T12:06:10.193580+00:00
+updated_at: 2026-11-14T01:22:00.940802+00:00
 ---
 
 # CNC Spindle Elevated Temperature Warning (`ERR-CNC-402`)

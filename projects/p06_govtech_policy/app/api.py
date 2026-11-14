@@ -26,6 +26,14 @@ from .ontology import (
     GovOntologyRegistry,
     seed_default_ontology,
 )
+from .workflow_router import (
+    CrossDeptWorkflowRouter,
+    PolicyDiffRequest,
+    PolicyDiffResult,
+    PolicyGazetteDiffer,
+    WorkflowRouteRequest,
+    WorkflowRouteResult,
+)
 
 
 class WikiIngestRequest(BaseModel):
@@ -155,6 +163,8 @@ def create_app(
         wiki=wiki,
         audit_log_path=resolved_dir / "audit.jsonl",
     )
+    workflow_router = CrossDeptWorkflowRouter()
+    gazette_differ = PolicyGazetteDiffer()
 
     metrics: dict[str, int] = {
         "requests_total": 0,
@@ -165,6 +175,8 @@ def create_app(
         "policy_refusals_total": 0,
         "hitl_approvals_total": 0,
         "batch_matches_total": 0,
+        "workflow_routes_total": 0,
+        "gazette_diffs_total": 0,
     }
 
     application = FastAPI(
@@ -183,6 +195,8 @@ def create_app(
     application.state.registry = registry
     application.state.wiki = wiki
     application.state.pipeline = pipeline
+    application.state.workflow_router = workflow_router
+    application.state.gazette_differ = gazette_differ
     application.state.metrics = metrics
 
     @application.middleware("http")
@@ -429,6 +443,21 @@ def create_app(
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @application.post("/api/v1/workflow/route-case", response_model=WorkflowRouteResult)
+    def route_workflow_case(payload: WorkflowRouteRequest) -> WorkflowRouteResult:
+        metrics["workflow_routes_total"] += 1
+        return workflow_router.route_case(payload)
+
+    @application.post("/api/v1/policy/gazette-diff", response_model=PolicyDiffResult)
+    def diff_policy_gazette(payload: PolicyDiffRequest) -> PolicyDiffResult:
+        metrics["gazette_diffs_total"] += 1
+        try:
+            return gazette_differ.diff(payload)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return application
 

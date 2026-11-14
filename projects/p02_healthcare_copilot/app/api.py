@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .fde_pipeline import HealthcareFDEPipeline
+from .fhir_adapter import ESITriageQueue, FHIRAdapter
 from .llm_wiki import ClinicalLLMWiki
 from .ontology import ClinicalOntologyRegistry, PatientCase
 
@@ -57,6 +58,12 @@ class DischargeSummaryRequest(BaseModel):
     follow_up_days: int = Field(default=7, ge=1, le=90)
 
 
+class FHIRBundleRequest(BaseModel):
+    patient_case: PatientCase
+    proposed_med_ids: list[str] = Field(default_factory=list)
+    raw_notes: str = ""
+
+
 def create_app(
     wiki_dir: Path | str | None = None,
     audit_log_path: Path | str | None = None,
@@ -75,6 +82,8 @@ def create_app(
     pipeline = HealthcareFDEPipeline(
         registry=registry, wiki=wiki, audit_log_path=resolved_audit_path
     )
+    fhir_adapter = FHIRAdapter(registry=registry)
+    triage_queue = ESITriageQueue(seed_defaults=True)
 
     metrics: dict[str, int] = {
         "requests_total": 0,
@@ -85,6 +94,7 @@ def create_app(
         "triage_total": 0,
         "hitl_approvals_total": 0,
         "discharge_summaries_total": 0,
+        "fhir_bundles_total": 0,
     }
 
     application = FastAPI(
@@ -101,6 +111,8 @@ def create_app(
     application.state.registry = registry
     application.state.wiki = wiki
     application.state.pipeline = pipeline
+    application.state.fhir_adapter = fhir_adapter
+    application.state.triage_queue = triage_queue
     application.state.metrics = metrics
 
     @application.middleware("http")
@@ -221,9 +233,86 @@ def create_app(
             proposed_med_ids=payload.proposed_med_ids,
             raw_notes=payload.raw_notes,
         )
+        interaction_obj = registry.evaluate_action_constraints(
+            payload.patient_case, payload.proposed_med_ids
+        )
+        esi_entry = triage_queue.enqueue_case(
+            case=payload.patient_case,
+            proposed_med_ids=payload.proposed_med_ids,
+            registry=registry,
+            interaction_result=interaction_obj,
+            action_id=result["proposed_action"]["action_id"],
+            status=result["proposed_action"]["status"],
+        )
+        soap_note = fhir_adapter.format_soap_note(
+            case=payload.patient_case,
+            proposed_med_ids=payload.proposed_med_ids,
+            raw_notes=payload.raw_notes,
+            interaction_result=interaction_obj,
+        )
+        result["esi_triage"] = esi_entry.model_dump()
+        result["soap_note"] = soap_note.model_dump()
         if result["interaction_check"]["blocked"]:
             metrics["blocked_interactions_total"] += 1
         return result
+
+    @application.post("/api/v1/clinical/fhir-bundle")
+    def clinical_fhir_bundle(payload: FHIRBundleRequest) -> dict[str, Any]:
+        metrics["fhir_bundles_total"] += 1
+        _, complaint_redacted = pipeline.deidentify_phi(
+            payload.patient_case.chief_complaint
+        )
+        _, notes_redacted = pipeline.deidentify_phi(payload.raw_notes)
+        redacted_fields = sorted(set(complaint_redacted + notes_redacted))
+
+        interaction_obj = registry.evaluate_action_constraints(
+            payload.patient_case, payload.proposed_med_ids
+        )
+        bundle = fhir_adapter.to_fhir_bundle(
+            case=payload.patient_case,
+            proposed_med_ids=payload.proposed_med_ids,
+            interaction_result=interaction_obj,
+        )
+        soap_note = fhir_adapter.format_soap_note(
+            case=payload.patient_case,
+            proposed_med_ids=payload.proposed_med_ids,
+            raw_notes=payload.raw_notes,
+            interaction_result=interaction_obj,
+        )
+        esi_entry = triage_queue.enqueue_case(
+            case=payload.patient_case,
+            proposed_med_ids=payload.proposed_med_ids,
+            registry=registry,
+            interaction_result=interaction_obj,
+        )
+        pipeline._record_audit(
+            event_type="FHIR_BUNDLE_GENERATED",
+            case_id=payload.patient_case.case_id,
+            action_id=None,
+            details={
+                "bundle_id": bundle["id"],
+                "resource_count": bundle["total"],
+                "esi_level": esi_entry.esi_level,
+                "redacted_phi_types": redacted_fields,
+                "guardrail_blocked": interaction_obj.blocked,
+            },
+        )
+        return {
+            "case_id": payload.patient_case.case_id,
+            "redacted_phi_types": redacted_fields,
+            "esi_triage": esi_entry.model_dump(),
+            "soap_note": soap_note.model_dump(),
+            "interaction_check": interaction_obj.model_dump(),
+            "bundle": bundle,
+        }
+
+    @application.get("/api/v1/clinical/triage-queue")
+    def clinical_triage_queue() -> dict[str, Any]:
+        entries = triage_queue.list_queue()
+        return {
+            "total": len(entries),
+            "queue": [entry.model_dump() for entry in entries],
+        }
 
     @application.post("/api/v1/clinical/discharge-summary")
     def clinical_discharge_summary(payload: DischargeSummaryRequest) -> dict[str, Any]:
@@ -258,6 +347,7 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        triage_queue.update_status(action.case_id, action.status)
         metrics["hitl_approvals_total"] += 1
         return {"status": action.status, "action": action.model_dump()}
 

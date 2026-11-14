@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import BlastRadiusView from './components/BlastRadiusView.vue'
+import IncidentTerminal from './components/IncidentTerminal.vue'
 import {
   devsecopsApi,
   type AuditLogEntry,
@@ -7,21 +9,22 @@ import {
   type CveGateResponse,
   type DashboardOverview,
   type PendingAction,
+  type PostmortemExportResponse,
+  type SBOMScanResponse,
   type TriageResponse,
   type WikiLintReport,
   type WikiPage,
 } from './api/client'
 
-type WorkbenchTab = 'triage' | 'blast' | 'wiki' | 'hitl'
+type WarRoomTab = 'triage' | 'blast' | 'terminal' | 'wiki' | 'hitl'
 
-const activeTab = ref<WorkbenchTab>('triage')
+const activeTab = ref<WarRoomTab>('blast')
 const loading = ref(false)
 const errorMessage = ref('')
 
 const overview = ref<DashboardOverview | null>(null)
 const selectedServiceId = ref('svc-auth')
 
-// Tab 1: 故障定界与 CVE 门禁
 const triageForm = ref({
   service_id: 'svc-auth',
   symptom: '502 Bad Gateway on /oauth/token with Bearer eyJhbGciOiJIUzI1NiJ9.secret_demo_token',
@@ -40,10 +43,10 @@ const gateForm = ref({
 })
 const gateResult = ref<CveGateResponse | null>(null)
 
-// Tab 2: 微服务爆炸半径图谱
 const blastRadius = ref<BlastRadiusResponse | null>(null)
+const sbomScan = ref<SBOMScanResponse | null>(null)
+const postmortemResult = ref<PostmortemExportResponse | null>(null)
 
-// Tab 3: Runbook LLM Wiki
 const wikiPages = ref<WikiPage[]>([])
 const selectedWikiPage = ref<WikiPage | null>(null)
 const wikiLint = ref<WikiLintReport | null>(null)
@@ -55,7 +58,6 @@ const wikiIngestForm = ref({
   links: 'svc-web-portal,svc-checkout',
 })
 
-// Tab 4: SRE HITL 审批与审计
 const pendingActions = ref<PendingAction[]>([])
 const auditLogs = ref<AuditLogEntry[]>([])
 const approverName = ref('sre-lead-alice')
@@ -67,7 +69,7 @@ async function refreshOverview() {
   overview.value = await devsecopsApi.getDashboardOverview()
 }
 
-async function refreshTab4() {
+async function refreshAuditAndPending() {
   const [pendingRes, auditRes] = await Promise.all([
     devsecopsApi.getPendingActions(),
     devsecopsApi.getAuditLogs(),
@@ -93,7 +95,24 @@ async function loadBlastRadius(serviceId = selectedServiceId.value) {
   errorMessage.value = ''
   try {
     selectedServiceId.value = serviceId
-    blastRadius.value = await devsecopsApi.getBlastRadius(serviceId)
+    const [blastRes, sbomRes] = await Promise.all([
+      devsecopsApi.getBlastRadius(serviceId),
+      devsecopsApi.scanSBOM({ service_id: serviceId }),
+    ])
+    blastRadius.value = blastRes
+    sbomScan.value = sbomRes
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function runSbomScan(serviceId = selectedServiceId.value) {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    sbomScan.value = await devsecopsApi.scanSBOM({ service_id: serviceId })
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -106,7 +125,7 @@ async function runTriage() {
   errorMessage.value = ''
   try {
     triageResult.value = await devsecopsApi.triageIncident(triageForm.value)
-    await Promise.all([refreshOverview(), refreshTab4()])
+    await Promise.all([refreshOverview(), refreshAuditAndPending()])
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -119,7 +138,19 @@ async function runCveGate() {
   errorMessage.value = ''
   try {
     gateResult.value = await devsecopsApi.evaluateCveGate(gateForm.value)
-    await Promise.all([refreshOverview(), refreshTab4()])
+    await Promise.all([refreshOverview(), refreshAuditAndPending()])
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    loading.value = false
+  }
+}
+
+async function handleExportPostmortem(payload: Parameters<typeof devsecopsApi.exportPostmortem>[0]) {
+  loading.value = true
+  errorMessage.value = ''
+  try {
+    postmortemResult.value = await devsecopsApi.exportPostmortem(payload)
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -160,7 +191,7 @@ async function handleHitlDecision(actionId: string, approved: boolean) {
       approver: approverName.value,
       comment: approvalComment.value,
     })
-    await Promise.all([refreshOverview(), refreshTab4()])
+    await Promise.all([refreshOverview(), refreshAuditAndPending()])
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -175,7 +206,7 @@ onMounted(async () => {
       refreshOverview(),
       loadBlastRadius('svc-auth'),
       refreshWiki(),
-      refreshTab4(),
+      refreshAuditAndPending(),
     ])
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)
@@ -186,82 +217,94 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="shell">
-    <header class="topbar">
+  <div class="war-shell">
+    <header class="war-topbar">
       <div>
-        <div class="eyebrow">PROJECT P07 · ENTERPRISE DEVSECOPS COPILOT</div>
-        <h1>DevSecOps 故障定界、爆炸半径与 SRE HITL 治理工作台</h1>
+        <div class="eyebrow">P07 // SRE WAR ROOM &amp; SBOM BLAST-RADIUS TERMINAL</div>
+        <h1>DevSecOps Incident Command &amp; Supply-Chain Console</h1>
       </div>
       <div class="status-pill" :class="{ busy: loading }">
-        {{ loading ? '同步中...' : 'FastAPI + Vue 3 实时在线' }}
+        <span class="pulse" />
+        {{ loading ? 'SYNCING TELEMETRY...' : 'TERMINAL ONLINE · OFFLINE DETERMINISTIC' }}
       </div>
     </header>
 
-    <section v-if="overview" class="kpi-grid">
-      <div class="kpi-card">
-        <span class="kpi-label">纳管微服务</span>
+    <section v-if="overview" class="kpi-strip">
+      <div class="kpi-tile">
+        <span class="kpi-label">SERVICES</span>
         <strong class="kpi-value">{{ overview.services_total }}</strong>
       </div>
-      <div class="kpi-card danger">
-        <span class="kpi-label">未修复高危 CVE</span>
+      <div class="kpi-tile alert">
+        <span class="kpi-label">CRITICAL CVEs</span>
         <strong class="kpi-value">{{ overview.critical_cves_total }}</strong>
       </div>
-      <div class="kpi-card warn">
-        <span class="kpi-label">活跃故障</span>
+      <div class="kpi-tile warn">
+        <span class="kpi-label">ACTIVE INCIDENTS</span>
         <strong class="kpi-value">{{ overview.active_incidents_total }}</strong>
       </div>
-      <div class="kpi-card warn">
-        <span class="kpi-label">待审批 HITL 回滚/隔离</span>
+      <div class="kpi-tile alert">
+        <span class="kpi-label">HITL QUEUE</span>
         <strong class="kpi-value">{{ overview.pending_hitl_rollbacks }}</strong>
       </div>
-      <div class="kpi-card">
-        <span class="kpi-label">LLM Wiki 页面</span>
+      <div class="kpi-tile">
+        <span class="kpi-label">WIKI RUNBOOKS</span>
         <strong class="kpi-value">{{ overview.wiki_pages_total }}</strong>
       </div>
-      <div class="kpi-card">
-        <span class="kpi-label">脱敏审计日志</span>
+      <div class="kpi-tile">
+        <span class="kpi-label">REDACTED AUDITS</span>
         <strong class="kpi-value">{{ overview.audit_logs_total }}</strong>
       </div>
     </section>
 
-    <div v-if="errorMessage" class="alert-error">
-      {{ errorMessage }}
+    <div v-if="errorMessage" class="alert-banner">
+      [ERROR] {{ errorMessage }}
     </div>
 
-    <nav class="tabs">
-      <button
-        :class="{ active: activeTab === 'triage' }"
-        @click="activeTab = 'triage'"
-      >
-        1. 故障定界与 CVE 门禁
+    <nav class="war-tabs">
+      <button :class="{ active: activeTab === 'blast' }" @click="activeTab = 'blast'">
+        01. BLAST-RADIUS &amp; SBOM
       </button>
-      <button
-        :class="{ active: activeTab === 'blast' }"
-        @click="activeTab = 'blast'"
-      >
-        2. 微服务爆炸半径图谱
+      <button :class="{ active: activeTab === 'terminal' }" @click="activeTab = 'terminal'">
+        02. INCIDENT TERMINAL &amp; POSTMORTEM
       </button>
-      <button
-        :class="{ active: activeTab === 'wiki' }"
-        @click="activeTab = 'wiki'"
-      >
-        3. Runbook LLM Wiki
+      <button :class="{ active: activeTab === 'triage' }" @click="activeTab = 'triage'">
+        03. TRIAGE &amp; CVE GATE
       </button>
-      <button
-        :class="{ active: activeTab === 'hitl' }"
-        @click="activeTab = 'hitl'"
-      >
-        4. SRE HITL 审批与审计 ({{ pendingActions.length }})
+      <button :class="{ active: activeTab === 'hitl' }" @click="activeTab = 'hitl'">
+        04. HITL APPROVALS ({{ pendingActions.length }})
+      </button>
+      <button :class="{ active: activeTab === 'wiki' }" @click="activeTab = 'wiki'">
+        05. RUNBOOK WIKI
       </button>
     </nav>
 
-    <!-- Tab 1: 故障定界与 CVE 门禁 -->
-    <main v-if="activeTab === 'triage'" class="two-col">
-      <section class="panel">
-        <h2>FDE 故障定界与密钥脱敏</h2>
+    <BlastRadiusView
+      v-if="activeTab === 'blast'"
+      :services="serviceOptions"
+      :selected-service-id="selectedServiceId"
+      :blast-radius="blastRadius"
+      :sbom-scan="sbomScan"
+      :loading="loading"
+      @select-service="loadBlastRadius"
+      @run-sbom-scan="runSbomScan"
+    />
+
+    <IncidentTerminal
+      v-else-if="activeTab === 'terminal'"
+      :services="serviceOptions"
+      :audit-logs="auditLogs"
+      :triage-result="triageResult"
+      :postmortem-result="postmortemResult"
+      :loading="loading"
+      @export-postmortem="handleExportPostmortem"
+    />
+
+    <main v-else-if="activeTab === 'triage'" class="two-col">
+      <section class="war-card">
+        <h2>FDE INCIDENT TRIAGE &amp; SECRET REDACTION</h2>
         <div class="form-grid">
           <label>
-            目标服务
+            TARGET SERVICE
             <select v-model="triageForm.service_id">
               <option v-for="svc in serviceOptions" :key="svc.service_id" :value="svc.service_id">
                 {{ svc.service_id }} ({{ svc.tier }})
@@ -269,7 +312,7 @@ onMounted(async () => {
             </select>
           </label>
           <label>
-            严重等级
+            SEVERITY
             <select v-model="triageForm.severity">
               <option value="SEV-1">SEV-1</option>
               <option value="SEV-2">SEV-2</option>
@@ -277,15 +320,15 @@ onMounted(async () => {
             </select>
           </label>
           <label>
-            拟议处置动作
+            PROPOSED ACTION
             <select v-model="triageForm.proposed_action">
-              <option value="rollback">rollback (触发 HITL)</option>
-              <option value="quarantine">quarantine (触发 HITL)</option>
-              <option value="notify">notify (自动执行)</option>
+              <option value="rollback">rollback (HITL)</option>
+              <option value="quarantine">quarantine (HITL)</option>
+              <option value="notify">notify (AUTO)</option>
             </select>
           </label>
           <label>
-            运行环境
+            ENVIRONMENT
             <select v-model="triageForm.environment">
               <option value="prod">prod</option>
               <option value="staging">staging</option>
@@ -293,152 +336,109 @@ onMounted(async () => {
           </label>
         </div>
         <label class="full-label">
-          故障症状 / 日志片段 (自动执行 Secret Redaction)
+          SYMPTOM / LOG PAYLOAD
           <textarea v-model="triageForm.symptom" rows="3" />
         </label>
-        <button class="primary-btn" :disabled="loading" @click="runTriage">
-          执行故障定界与处置提案
+        <button class="btn-green" :disabled="loading" @click="runTriage">
+          EXECUTE TRIAGE
         </button>
 
         <div v-if="triageResult" class="result-box">
-          <div class="result-header">
-            <span class="badge">{{ triageResult.action.status }}</span>
-            <span>Action ID: <code>{{ triageResult.action.action_id }}</code></span>
+          <div class="result-head">
+            <span class="badge ok">{{ triageResult.action.status }}</span>
+            <span>ACTION: <code>{{ triageResult.action.action_id }}</code></span>
           </div>
-          <p><strong>脱敏后症状：</strong><code>{{ triageResult.redacted_symptom }}</code></p>
-          <p v-if="triageResult.redactions_applied.length">
-            <strong>触发脱敏规则：</strong>{{ triageResult.redactions_applied.join(', ') }}
-          </p>
-          <div>
-            <strong>根因假设：</strong>
-            <ul>
-              <li v-for="(h, idx) in triageResult.root_cause_hypotheses" :key="idx">{{ h }}</li>
-            </ul>
-          </div>
+          <p><strong>REDACTED:</strong> <code>{{ triageResult.redacted_symptom }}</code></p>
+          <ul>
+            <li v-for="(h, idx) in triageResult.root_cause_hypotheses" :key="idx">{{ h }}</li>
+          </ul>
         </div>
       </section>
 
-      <section class="panel">
-        <h2>CI/CD 发布 CVE 安全门禁</h2>
+      <section class="war-card">
+        <h2>CI/CD RELEASE CVE GATE</h2>
         <div class="form-grid">
           <label>
-            发布服务
+            SERVICE
             <select v-model="gateForm.service_id">
               <option v-for="svc in serviceOptions" :key="svc.service_id" :value="svc.service_id">
-                {{ svc.service_id }} ({{ svc.name }})
+                {{ svc.service_id }}
               </option>
             </select>
           </label>
           <label>
-            发布版本
+            RELEASE VERSION
             <input v-model="gateForm.release_version" type="text" />
           </label>
           <label>
-            阻断阈值 (CVSS)
+            CVSS THRESHOLD
             <input v-model.number="gateForm.block_threshold" type="number" step="0.1" min="0" max="10" />
           </label>
           <label class="checkbox-label">
             <input v-model="gateForm.include_dependencies" type="checkbox" />
-            级联检查下游依赖 CVE
+            INCLUDE TRANSITIVE DEPS
           </label>
         </div>
-        <button class="primary-btn" :disabled="loading" @click="runCveGate">
-          评估发布门禁 (ALLOW / BLOCK_DEPLOY)
+        <button class="btn-green" :disabled="loading" @click="runCveGate">
+          EVALUATE DEPLOY GATE
         </button>
 
         <div v-if="gateResult" class="result-box">
-          <div class="result-header">
+          <div class="result-head">
             <span class="badge" :class="gateResult.allowed ? 'ok' : 'danger'">
               {{ gateResult.decision }}
             </span>
-            <span>Max CVSS: <strong>{{ gateResult.max_cvss }}</strong></span>
+            <span>MAX CVSS: <strong>{{ gateResult.max_cvss }}</strong></span>
           </div>
-          <p><strong>检查范围：</strong>{{ gateResult.checked_services.join(' → ') }}</p>
-          <div v-if="gateResult.blocking_cves.length">
-            <strong>阻断 CVE 列表：</strong>
-            <ul>
-              <li v-for="cve in gateResult.blocking_cves" :key="cve.cve_id">
-                <code>{{ cve.cve_id }}</code> ({{ cve.service_id }}, CVSS {{ cve.cvss_score }}) — {{ cve.remediation }}
-              </li>
-            </ul>
-          </div>
-          <p v-else class="ok-text">未发现超过阈值的未修复漏洞，允许发布。</p>
+          <p><strong>CHECKED:</strong> {{ gateResult.checked_services.join(' -> ') }}</p>
+          <ul v-if="gateResult.blocking_cves.length">
+            <li v-for="cve in gateResult.blocking_cves" :key="cve.cve_id">
+              <code>{{ cve.cve_id }}</code> ({{ cve.service_id }}, CVSS {{ cve.cvss_score }}) — {{ cve.remediation }}
+            </li>
+          </ul>
         </div>
       </section>
     </main>
 
-    <!-- Tab 2: 微服务爆炸半径图谱 -->
-    <main v-if="activeTab === 'blast'" class="panel">
+    <main v-else-if="activeTab === 'hitl'" class="war-card">
       <div class="toolbar">
-        <h2>微服务爆炸半径与 Tier-0 影响面分析</h2>
-        <div class="toolbar-actions">
-          <select v-model="selectedServiceId" @change="loadBlastRadius(selectedServiceId)">
-            <option v-for="svc in serviceOptions" :key="svc.service_id" :value="svc.service_id">
-              {{ svc.service_id }} — {{ svc.name }}
-            </option>
-          </select>
-          <button class="secondary-btn" @click="loadBlastRadius(selectedServiceId)">刷新图谱</button>
+        <h2>SRE HITL APPROVAL QUEUE</h2>
+        <div class="inline-inputs">
+          <input v-model="approverName" placeholder="Approver ID" />
+          <input v-model="approvalComment" placeholder="Decision rationale" />
         </div>
       </div>
 
-      <div v-if="blastRadius" class="blast-layout">
-        <div class="blast-summary">
-          <div class="node-root">
-            <span class="tier-tag">{{ blastRadius.root_tier }}</span>
-            <strong>{{ blastRadius.root_service_id }}</strong>
-            <small>受影响上游服务: {{ blastRadius.total_impacted_services }}</small>
-          </div>
-          <div class="tier0-box">
-            <strong>波及 Tier-0 核心服务：</strong>
-            <span v-for="t0 in blastRadius.tier0_impacted" :key="t0" class="badge danger">{{ t0 }}</span>
-          </div>
-        </div>
-
-        <div class="two-col">
+      <div v-if="pendingActions.length === 0" class="empty-state">
+        NO PENDING HITL ROLLBACK / QUARANTINE REQUESTS
+      </div>
+      <div v-else class="pending-list">
+        <div v-for="act in pendingActions" :key="act.action_id" class="pending-item">
           <div>
-            <h3>上游受影响链路 (Propagation Paths)</h3>
-            <ul class="path-list">
-              <li v-for="item in blastRadius.impacted_upstream" :key="item.service_id">
-                <div class="path-head">
-                  <strong>{{ item.service_id }}</strong>
-                  <span class="badge">{{ item.tier }} · depth {{ item.depth }}</span>
-                </div>
-                <code>{{ item.propagation_path.join(' ⇐ ') }}</code>
-              </li>
-            </ul>
+            <strong>{{ act.action_type.toUpperCase() }}</strong> → <code>{{ act.target_service_id }}</code>
+            ({{ act.environment }})
+            <div class="muted">{{ act.action_id }} · {{ act.reason }}</div>
           </div>
-          <div>
-            <h3>下游依赖与活跃 CVE</h3>
-            <ul class="path-list">
-              <li v-for="dep in blastRadius.downstream_dependencies" :key="dep.service_id">
-                依赖 <strong>{{ dep.service_id }}</strong> ({{ dep.relation }} / {{ dep.criticality }})
-              </li>
-              <li v-if="blastRadius.downstream_dependencies.length === 0">无下游服务依赖</li>
-            </ul>
-            <h3>活跃未修复 CVE</h3>
-            <ul class="path-list">
-              <li v-for="cve in blastRadius.active_cves" :key="cve.cve_id">
-                <code>{{ cve.cve_id }}</code> — CVSS {{ cve.cvss_score }} ({{ cve.severity }})
-              </li>
-              <li v-if="blastRadius.active_cves.length === 0">当前服务无未修复 CVE</li>
-            </ul>
+          <div class="inline-inputs">
+            <button class="btn-green" :disabled="loading" @click="handleHitlDecision(act.action_id, true)">
+              APPROVE
+            </button>
+            <button class="btn-red" :disabled="loading" @click="handleHitlDecision(act.action_id, false)">
+              REJECT
+            </button>
           </div>
         </div>
       </div>
     </main>
 
-    <!-- Tab 3: Runbook LLM Wiki -->
-    <main v-if="activeTab === 'wiki'" class="two-col">
-      <section class="panel">
+    <main v-else-if="activeTab === 'wiki'" class="two-col">
+      <section class="war-card">
         <div class="toolbar">
-          <h2>Runbook / Postmortem Wiki 目录</h2>
-          <button class="secondary-btn" @click="refreshWiki">刷新 &amp; Lint</button>
+          <h2>RUNBOOK / POSTMORTEM WIKI</h2>
+          <button class="btn-outline" @click="refreshWiki">LINT WIKI</button>
         </div>
-        <div v-if="wikiLint" class="lint-bar" :class="wikiLint.healthy ? 'ok' : 'warn'">
-          <span>Wiki 健康状态: <strong>{{ wikiLint.healthy ? 'HEALTHY' : `${wikiLint.total_issues} ISSUES` }}</strong></span>
-          <span v-if="wikiLint.services_without_runbooks.length">
-            缺 Runbook 服务: {{ wikiLint.services_without_runbooks.join(', ') }}
-          </span>
+        <div v-if="wikiLint" class="lint-bar" :class="wikiLint.healthy ? 'ok' : 'danger'">
+          STATUS: {{ wikiLint.healthy ? 'HEALTHY' : `${wikiLint.total_issues} ISSUES` }}
         </div>
         <div class="wiki-list">
           <button
@@ -448,99 +448,24 @@ onMounted(async () => {
             :class="{ selected: selectedWikiPage?.id === page.id }"
             @click="selectedWikiPage = page"
           >
-            <div class="wiki-item-head">
-              <strong>{{ page.title }}</strong>
-              <span class="badge">{{ page.entity_type }}</span>
-            </div>
-            <small>{{ page.path }}</small>
-            <p>{{ page.preview }}</p>
+            <strong>[{{ page.entity_type }}] {{ page.id }}</strong>
+            <span>{{ page.title }}</span>
           </button>
         </div>
       </section>
 
-      <section class="panel">
-        <h2>Markdown 详情与知识入库</h2>
-        <pre v-if="selectedWikiPage" class="wiki-preview">{{ selectedWikiPage.content || selectedWikiPage.preview }}</pre>
-
-        <h3>新增 / 更新 Wiki 实体</h3>
+      <section class="war-card">
+        <h2>{{ selectedWikiPage?.title ?? 'SELECT A WIKI PAGE' }}</h2>
+        <pre v-if="selectedWikiPage" class="wiki-content">{{ selectedWikiPage.content }}</pre>
+        <h3>INGEST RUNBOOK</h3>
         <div class="form-grid">
-          <label>
-            实体类型
-            <input v-model="wikiIngestForm.entity_type" type="text" />
-          </label>
-          <label>
-            实体 ID
-            <input v-model="wikiIngestForm.entity_id" type="text" />
-          </label>
+          <input v-model="wikiIngestForm.entity_id" placeholder="Entity ID" />
+          <input v-model="wikiIngestForm.title" placeholder="Title" />
         </div>
-        <label class="full-label">
-          标题
-          <input v-model="wikiIngestForm.title" type="text" />
-        </label>
-        <label class="full-label">
-          Markdown 正文 (支持 [[wiki_links]])
-          <textarea v-model="wikiIngestForm.content" rows="3" />
-        </label>
-        <label class="full-label">
-          关联实体 ID (逗号分隔)
-          <input v-model="wikiIngestForm.links" type="text" />
-        </label>
-        <button class="primary-btn" :disabled="loading" @click="submitWikiIngest">
-          写入 Wiki 并重建索引
+        <textarea v-model="wikiIngestForm.content" rows="3" />
+        <button class="btn-green" :disabled="loading" @click="submitWikiIngest">
+          INGEST TO WIKI
         </button>
-      </section>
-    </main>
-
-    <!-- Tab 4: SRE HITL 审批与审计 -->
-    <main v-if="activeTab === 'hitl'" class="two-col">
-      <section class="panel">
-        <div class="toolbar">
-          <h2>待审批 SRE HITL 动作</h2>
-          <button class="secondary-btn" @click="refreshTab4">刷新队列</button>
-        </div>
-        <div class="form-grid">
-          <label>
-            审批人
-            <input v-model="approverName" type="text" />
-          </label>
-          <label>
-            审批备注
-            <input v-model="approvalComment" type="text" />
-          </label>
-        </div>
-
-        <div v-if="pendingActions.length === 0" class="empty-state">
-          当前无待审批的生产环境回滚 / 隔离动作。可在「故障定界」页签发起 rollback 或 quarantine 提案。
-        </div>
-        <div v-for="act in pendingActions" :key="act.action_id" class="hitl-card">
-          <div class="result-header">
-            <span class="badge warn">{{ act.action_type.toUpperCase() }}</span>
-            <code>{{ act.action_id }}</code>
-            <span>{{ act.target_service_id }} ({{ act.environment }})</span>
-          </div>
-          <p>{{ act.reason }}</p>
-          <div class="hitl-buttons">
-            <button class="primary-btn" @click="handleHitlDecision(act.action_id, true)">
-              批准执行 (Approve)
-            </button>
-            <button class="danger-btn" @click="handleHitlDecision(act.action_id, false)">
-              拒绝 (Reject)
-            </button>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel">
-        <h2>Secret-Redacted 不可变审计日志</h2>
-        <div v-if="auditLogs.length === 0" class="empty-state">暂无审计事件。</div>
-        <div v-for="log in auditLogs" :key="log.audit_id" class="audit-item">
-          <div class="result-header">
-            <span class="badge">{{ log.event_type }}</span>
-            <span>{{ log.actor }}</span>
-            <small>{{ log.timestamp }}</small>
-          </div>
-          <pre class="audit-payload">{{ JSON.stringify(log.payload, null, 2) }}</pre>
-        </div>
       </section>
     </main>
   </div>
@@ -549,393 +474,357 @@ onMounted(async () => {
 <style scoped>
 :global(body) {
   margin: 0;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #0b1120;
+  background: #090d16;
   color: #e2e8f0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
 }
 
-.shell {
-  max-width: 1360px;
+.war-shell {
+  min-height: 100vh;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 24px;
+  padding: 20px;
 }
 
-.topbar {
+.war-topbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 20px;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #1e293b;
+  padding-bottom: 14px;
+  margin-bottom: 16px;
 }
 
 .eyebrow {
-  font-size: 12px;
+  font-size: 11px;
   letter-spacing: 0.12em;
-  color: #38bdf8;
-  font-weight: 700;
+  color: #22c55e;
 }
 
 h1 {
   margin: 4px 0 0;
-  font-size: 22px;
-}
-
-h2 {
-  margin: 0 0 14px;
-  font-size: 17px;
+  font-size: 20px;
   color: #f8fafc;
 }
 
-h3 {
-  margin: 16px 0 8px;
+h2 {
+  margin: 0 0 12px;
   font-size: 14px;
-  color: #94a3b8;
+  color: #22c55e;
+  letter-spacing: 0.05em;
 }
 
 .status-pill {
-  padding: 8px 14px;
-  border-radius: 999px;
-  background: #0f2937;
-  border: 1px solid #0284c7;
-  color: #7dd3fc;
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  padding: 6px 12px;
+  border: 1px solid #22c55e;
+  border-radius: 4px;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.08);
 }
 
 .status-pill.busy {
   border-color: #f59e0b;
-  color: #fcd34d;
+  color: #fbbf24;
 }
 
-.kpi-grid {
+.pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.kpi-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 12px;
-  margin-bottom: 20px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
 }
 
-.kpi-card {
-  background: #111827;
+.kpi-tile {
+  background: #0d1320;
   border: 1px solid #1e293b;
-  border-radius: 10px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  border-radius: 4px;
+  padding: 10px 12px;
 }
 
-.kpi-card.danger {
-  border-color: #7f1d1d;
+.kpi-tile.alert {
+  border-color: rgba(239, 68, 68, 0.55);
 }
 
-.kpi-card.warn {
-  border-color: #78350f;
+.kpi-tile.warn {
+  border-color: rgba(245, 158, 11, 0.5);
 }
 
 .kpi-label {
-  font-size: 12px;
+  display: block;
+  font-size: 10px;
   color: #94a3b8;
+  letter-spacing: 0.08em;
 }
 
 .kpi-value {
-  font-size: 24px;
+  font-size: 22px;
   color: #f8fafc;
 }
 
-.tabs {
+.kpi-tile.alert .kpi-value {
+  color: #ef4444;
+}
+
+.alert-banner {
+  background: rgba(239, 68, 68, 0.14);
+  border: 1px solid #ef4444;
+  color: #fca5a5;
+  padding: 10px 12px;
+  border-radius: 4px;
+  margin-bottom: 14px;
+  font-size: 12px;
+}
+
+.war-tabs {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
-  margin-bottom: 18px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
 }
 
-.tabs button {
-  background: #111827;
-  color: #cbd5e1;
+.war-tabs button {
+  background: #0d1320;
+  color: #94a3b8;
   border: 1px solid #1e293b;
-  padding: 10px 16px;
-  border-radius: 8px;
+  border-radius: 4px;
+  padding: 8px 14px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
   cursor: pointer;
-  font-weight: 600;
 }
 
-.tabs button.active {
-  background: #0284c7;
-  border-color: #38bdf8;
-  color: #ffffff;
+.war-tabs button.active {
+  color: #22c55e;
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.12);
 }
 
 .two-col {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(460px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
 }
 
-.panel {
-  background: #111827;
+.war-card {
+  background: #0d1320;
   border: 1px solid #1e293b;
-  border-radius: 12px;
-  padding: 18px;
+  border-radius: 6px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 8px;
 }
 
 label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
+  gap: 4px;
+  font-size: 11px;
   color: #94a3b8;
-}
-
-.full-label {
-  margin-bottom: 12px;
 }
 
 .checkbox-label {
   flex-direction: row;
   align-items: center;
-  padding-top: 20px;
+  gap: 8px;
 }
 
 input,
 select,
 textarea {
-  background: #0f172a;
-  border: 1px solid #334155;
-  color: #f8fafc;
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 13px;
-}
-
-.primary-btn,
-.secondary-btn,
-.danger-btn {
-  border: none;
-  border-radius: 8px;
-  padding: 9px 14px;
-  font-weight: 600;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.primary-btn {
-  background: #0284c7;
-  color: #ffffff;
-}
-
-.secondary-btn {
-  background: #1e293b;
+  background: #090d16;
   color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 7px 9px;
+  font-family: inherit;
+  font-size: 12px;
 }
 
-.danger-btn {
-  background: #dc2626;
-  color: #ffffff;
+.btn-green {
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid #22c55e;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-.result-box,
-.hitl-card,
-.audit-item {
-  margin-top: 14px;
-  background: #0f172a;
-  border: 1px solid #1e293b;
-  border-radius: 8px;
-  padding: 12px;
+.btn-red {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+  border: 1px solid #ef4444;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
 }
 
-.result-header {
+.btn-outline {
+  background: #111827;
+  color: #cbd5e1;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 7px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.result-box {
+  background: #090d16;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  padding: 10px;
+  font-size: 12px;
+}
+
+.result-head {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
-  flex-wrap: wrap;
+  margin-bottom: 6px;
 }
 
 .badge {
-  background: #1e293b;
-  color: #cbd5e1;
-  padding: 3px 8px;
-  border-radius: 6px;
-  font-size: 12px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
   font-weight: 700;
 }
 
 .badge.ok {
-  background: #064e3b;
-  color: #6ee7b7;
+  background: rgba(34, 197, 94, 0.16);
+  color: #22c55e;
 }
 
 .badge.danger {
-  background: #7f1d1d;
-  color: #fca5a5;
-}
-
-.badge.warn {
-  background: #78350f;
-  color: #fcd34d;
+  background: rgba(239, 68, 68, 0.18);
+  color: #ef4444;
 }
 
 .toolbar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.toolbar-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.blast-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  background: #0f172a;
-  padding: 14px;
-  border-radius: 10px;
-  border: 1px solid #1e293b;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.node-root {
-  display: flex;
-  align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
 }
 
-.tier-tag {
-  background: #0284c7;
-  color: #ffffff;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 12px;
-}
-
-.tier0-box {
+.inline-inputs {
   display: flex;
-  align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.path-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
+.pending-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.path-list li {
-  background: #0f172a;
+.pending-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: #090d16;
   border: 1px solid #1e293b;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 10px;
 }
 
-.path-head {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 4px;
+.muted,
+.empty-state {
+  font-size: 12px;
+  color: #64748b;
 }
 
 .lint-bar {
-  padding: 10px 12px;
-  border-radius: 8px;
-  margin-bottom: 12px;
-  display: flex;
-  justify-content: space-between;
-  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  font-size: 12px;
 }
 
 .lint-bar.ok {
-  background: #064e3b;
+  background: rgba(34, 197, 94, 0.12);
+  color: #22c55e;
 }
 
-.lint-bar.warn {
-  background: #451a03;
-  border: 1px solid #b45309;
+.lint-bar.danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #ef4444;
 }
 
 .wiki-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  max-height: 480px;
+  gap: 6px;
+  max-height: 360px;
   overflow-y: auto;
 }
 
 .wiki-item {
   text-align: left;
-  background: #0f172a;
+  background: #090d16;
+  color: #cbd5e1;
   border: 1px solid #1e293b;
-  color: #e2e8f0;
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: 4px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
 }
 
 .wiki-item.selected {
-  border-color: #38bdf8;
+  border-color: #22c55e;
+  color: #22c55e;
 }
 
-.wiki-item-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.wiki-item p {
-  margin: 6px 0 0;
-  font-size: 12px;
-  color: #94a3b8;
-}
-
-.wiki-preview,
-.audit-payload {
-  background: #020617;
+.wiki-content {
+  background: #090d16;
   border: 1px solid #1e293b;
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 4px;
+  padding: 10px;
   font-size: 12px;
-  overflow-x: auto;
   white-space: pre-wrap;
+  max-height: 220px;
+  overflow-y: auto;
 }
 
-.hitl-buttons {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.empty-state {
-  padding: 16px;
-  text-align: center;
-  color: #94a3b8;
-  background: #0f172a;
-  border-radius: 8px;
-}
-
-.alert-error {
-  background: #7f1d1d;
-  color: #fecaca;
-  padding: 10px 14px;
-  border-radius: 8px;
-  margin-bottom: 14px;
-}
-
-.ok-text {
-  color: #6ee7b7;
+@media (max-width: 960px) {
+  .kpi-strip,
+  .two-col,
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

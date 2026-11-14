@@ -6,7 +6,7 @@ requires_shutdown: true
 entity_id: ERR-VIB-301
 entity_type: FaultCode
 title: Excessive Spindle/Axis Vibration
-updated_at: 2026-11-13T12:06:10.194334+00:00
+updated_at: 2026-11-14T01:22:00.944804+00:00
 ---
 
 # Excessive Spindle/Axis Vibration (`ERR-VIB-301`)

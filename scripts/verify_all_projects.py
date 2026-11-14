@@ -39,6 +39,44 @@ REQUIRED_FILES = [
     "frontend/src/App.vue",
 ]
 
+DOMAIN_SPECIFIC_FILES = {
+    "p01_fintech_research": [
+        "app/quant_engine.py",
+        "frontend/src/components/TickerWatchlist.vue",
+        "frontend/src/components/ComplianceBlotter.vue",
+    ],
+    "p02_healthcare_copilot": [
+        "app/fhir_adapter.py",
+        "frontend/src/components/PatientQueue.vue",
+        "frontend/src/components/MedicationMatrix.vue",
+    ],
+    "p03_legal_contract": [
+        "app/redline_engine.py",
+        "frontend/src/components/ClauseNavigator.vue",
+        "frontend/src/components/RedlineDiffViewer.vue",
+    ],
+    "p04_manufacturing_ops": [
+        "app/telemetry_stream.py",
+        "frontend/src/components/TelemetryGrid.vue",
+        "frontend/src/components/WorkOrderBoard.vue",
+    ],
+    "p05_retail_supply": [
+        "app/supply_optimizer.py",
+        "frontend/src/components/MarginSandbox.vue",
+        "frontend/src/components/WarehouseMatrix.vue",
+    ],
+    "p06_govtech_policy": [
+        "app/workflow_router.py",
+        "frontend/src/components/EligibilityWizard.vue",
+        "frontend/src/components/PolicyGazette.vue",
+    ],
+    "p07_devsecops_copilot": [
+        "app/sbom_scanner.py",
+        "frontend/src/components/BlastRadiusView.vue",
+        "frontend/src/components/IncidentTerminal.vue",
+    ],
+}
+
 
 def main() -> int:
     project_dirs = sorted(p for p in PROJECTS_DIR.iterdir() if p.is_dir() and p.name.startswith("p0"))
@@ -49,11 +87,12 @@ def main() -> int:
     total_passed = 0
     for proj in project_dirs:
         print(f"\n=== Verifying {proj.name} ===")
-        missing = [rel for rel in REQUIRED_FILES if not (proj / rel).exists()]
+        expected = REQUIRED_FILES + DOMAIN_SPECIFIC_FILES.get(proj.name, [])
+        missing = [rel for rel in expected if not (proj / rel).exists()]
         if missing:
             print(f"[FAIL] {proj.name} missing required files: {missing}")
             return 1
-        print(f"[OK] All {len(REQUIRED_FILES)} production & PMP files present.")
+        print(f"[OK] All {len(expected)} production, PMP, Vue3, and domain-specific files present.")
 
         proc = subprocess.run(
             [sys.executable, "-m", "pytest", str(proj / "tests"), "-v"],

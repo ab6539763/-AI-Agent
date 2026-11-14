@@ -133,6 +133,97 @@ export interface AuditLogItem {
   details: Record<string, unknown>;
 }
 
+export interface EOQTradeoffPoint {
+  multiplier: number;
+  order_qty: number;
+  annual_ordering_cost: number;
+  annual_holding_cost: number;
+  annual_stockout_cost: number;
+  total_relevant_cost: number;
+}
+
+export interface EOQResultItem {
+  sku_id: string;
+  sku_name: string;
+  category: string;
+  supplier_id: string;
+  warehouse_id: string;
+  current_stock: number;
+  daily_demand: number;
+  annual_demand: number;
+  lead_time_days: number;
+  service_level: number;
+  z_score: number;
+  eoq_raw: number;
+  recommended_order_qty: number;
+  safety_stock: number;
+  reorder_point: number;
+  needs_replenishment: boolean;
+  orders_per_year: number;
+  annual_ordering_cost: number;
+  annual_holding_cost: number;
+  annual_stockout_cost: number;
+  total_relevant_cost: number;
+  holding_vs_stockout_ratio: number;
+  tradeoff_curve: EOQTradeoffPoint[];
+}
+
+export interface EOQOptimizeResponse {
+  items: EOQResultItem[];
+  total_skus: number;
+  skus_needing_replenishment: number;
+  total_annual_ordering_cost: number;
+  total_annual_holding_cost: number;
+  total_annual_stockout_cost: number;
+  total_relevant_cost: number;
+}
+
+export interface TransferPlanItem {
+  transfer_id: string;
+  sku_id: string;
+  sku_name: string;
+  from_warehouse: string;
+  to_warehouse: string;
+  quantity: number;
+  estimated_transfer_cost: number;
+  estimated_stockout_savings: number;
+  net_benefit: number;
+  reason: string;
+}
+
+export interface WarehouseSKUCell {
+  sku_id: string;
+  sku_name: string;
+  warehouse_id: string;
+  current_qty: number;
+  target_qty: number;
+  delta: number;
+  status: "SURPLUS" | "BALANCED" | "DEFICIT" | string;
+}
+
+export interface WarehouseSummary {
+  warehouse_id: string;
+  name: string;
+  region: string;
+  capacity_units: number;
+  current_utilization_units: number;
+  utilization_pct: number;
+  total_sku_units: number;
+  surplus_units: number;
+  deficit_units: number;
+}
+
+export interface RebalanceResponse {
+  transfers: TransferPlanItem[];
+  total_transfers: number;
+  total_units_rebalanced: number;
+  total_transfer_cost: number;
+  total_stockout_savings: number;
+  total_net_benefit: number;
+  warehouse_summary: WarehouseSummary[];
+  matrix: WarehouseSKUCell[];
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE || "";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -221,4 +312,28 @@ export const apiClient = {
     }),
   getAuditLogs: () =>
     request<{ items: AuditLogItem[]; total: number }>("/api/v1/audit/logs"),
+  optimizeEOQ: (payload: {
+    sku_id?: string | null;
+    ordering_cost?: number;
+    holding_cost_rate?: number;
+    service_level?: number;
+    daily_demand_override?: number | null;
+    lead_time_override?: number | null;
+    promo_lift_pct?: number;
+  }) =>
+    request<EOQOptimizeResponse>("/api/v1/supply/eoq-optimize", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  rebalanceWarehouses: (payload: {
+    sku_ids?: string[] | null;
+    stock_matrix?: Record<string, Record<string, number>> | null;
+    target_cover_days?: number;
+    transfer_cost_per_unit?: number;
+    min_transfer_qty?: number;
+  }) =>
+    request<RebalanceResponse>("/api/v1/supply/rebalance", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 };

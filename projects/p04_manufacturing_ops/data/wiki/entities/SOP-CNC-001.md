@@ -5,7 +5,7 @@ estimated_minutes: 45
 entity_id: SOP-CNC-001
 entity_type: MaintenanceSOP
 title: CNC Spindle Overheat & Bearing Inspection
-updated_at: 2026-11-13T12:06:10.189987+00:00
+updated_at: 2026-11-14T01:22:00.937665+00:00
 ---
 
 # CNC Spindle Overheat & Bearing Inspection (`SOP-CNC-001`)

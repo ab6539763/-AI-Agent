@@ -1,23 +1,24 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import {
   p01Api,
   type AuditLogEntry,
-  type BatchScreenResponse,
   type ComplianceAction,
+  type CreditScoreResponse,
   type DashboardOverview,
   type OntologyGraphResponse,
   type ResearchQueryResponse,
   type WikiLintResponse,
   type WikiPageSummary,
 } from "./api/client";
+import TickerWatchlist, { type WatchlistIssuer } from "./components/TickerWatchlist.vue";
+import ComplianceBlotter from "./components/ComplianceBlotter.vue";
 
-type TabKey = "workbench" | "ontology" | "wiki" | "hitl";
-
-const activeTab = ref<TabKey>("workbench");
 const loading = ref(false);
 const bannerError = ref("");
 const bannerSuccess = ref("");
+const drawerOpen = ref(false);
+const drawerTab = ref<"ontology" | "wiki">("ontology");
 
 const overview = ref<DashboardOverview>({
   total_issuers: 0,
@@ -25,14 +26,69 @@ const overview = ref<DashboardOverview>({
   wiki_pages_count: 0,
   pending_hitl_count: 0,
   audit_events_count: 0,
+  ontology_links_count: 0,
 });
 
-// Tab 1: Research & Batch Screen
+// Seeded + dynamic Bloomberg/Wind-style watchlist
+const watchlist = ref<WatchlistIssuer[]>([
+  {
+    issuer_id: "issuer_alpha",
+    ticker: "ALPH",
+    name: "Alpha FinTech Holdings",
+    sector: "Lending",
+    credit_rating: "BBB",
+    risk_level: "HIGH",
+    financials: {
+      total_debt: 320,
+      shareholders_equity: 100,
+      current_assets: 85,
+      current_liabilities: 100,
+      ebit: 12,
+      interest_expense: 10,
+      net_income: 8,
+    },
+  },
+  {
+    issuer_id: "issuer_beta",
+    ticker: "BETA",
+    name: "Beta Cross-Border Pay",
+    sector: "Payments",
+    credit_rating: "AA",
+    risk_level: "SAFE",
+    financials: {
+      total_debt: 60,
+      shareholders_equity: 180,
+      current_assets: 210,
+      current_liabilities: 95,
+      ebit: 64,
+      interest_expense: 5,
+      net_income: 46,
+    },
+  },
+  {
+    issuer_id: "issuer_gamma",
+    ticker: "GAMM",
+    name: "Gamma Consumer Credit",
+    sector: "Credit",
+    credit_rating: "BB",
+    risk_level: "CRITICAL",
+    financials: {
+      total_debt: 360,
+      shareholders_equity: 90,
+      current_assets: 70,
+      current_liabilities: 125,
+      ebit: 11,
+      interest_expense: 14,
+      net_income: -4,
+    },
+  },
+]);
+
 const queryForm = reactive({
   issuer_id: "issuer_alpha",
   actor_role: "analyst",
   period: "2025-Q4",
-  question: "评估 Alpha Fin 2025-Q4 杠杆率与偿债覆盖风险",
+  question: "Assess Alpha FinTech leverage, Altman Z-Score, and DCF sensitivity",
   total_debt: 320,
   shareholders_equity: 100,
   current_assets: 85,
@@ -40,57 +96,134 @@ const queryForm = reactive({
   ebit: 12,
   interest_expense: 10,
   net_income: 8,
+  wacc: 0.09,
+  terminal_growth: 0.025,
 });
-const queryResult = ref<ResearchQueryResponse | null>(null);
-const batchResult = ref<BatchScreenResponse | null>(null);
 
-// Tab 2: Ontology Graph
+const creditScore = ref<CreditScoreResponse | null>(null);
+const queryResult = ref<ResearchQueryResponse | null>(null);
+
+// SSE Streaming state
+const streamStatus = ref<"idle" | "streaming" | "completed" | "blocked" | "error">("idle");
+const streamOutput = ref("");
+const streamStages = ref<Array<Record<string, unknown>>>([]);
+let closeStreamFn: (() => void) | null = null;
+
+// Right Blotter state
+const pendingActions = ref<ComplianceAction[]>([]);
+const auditLogs = ref<AuditLogEntry[]>([]);
+
+// Drawer: Ontology & Wiki
 const graphIssuerFilter = ref("");
 const graphMaxDepth = ref(2);
 const graphData = ref<OntologyGraphResponse>({ nodes: [], edges: [] });
-
-// Tab 3: LLM Wiki & Lint
 const wikiPages = ref<WikiPageSummary[]>([]);
 const lintResult = ref<WikiLintResponse | null>(null);
 const ingestForm = reactive({
   doc_id: "doc_q4_alpha",
-  title: "Alpha Fin 2025-Q4 财报摘要",
-  content: "Alpha Fin 业务稳健，同业对标 [[issuer_beta]]。",
+  title: "Alpha FinTech 2025-Q4 Filing",
+  content: "Alpha FinTech exposure and liquidity review; peer [[issuer_beta]].",
   entity_id: "issuer_alpha",
-  entity_name: "Alpha Fin",
+  entity_name: "Alpha FinTech Holdings",
   ticker: "ALPH",
   sector: "Lending",
   credit_rating: "BBB",
   period: "2025-Q4",
-  debt_to_equity: 2.1,
+  debt_to_equity: 3.2,
 });
 
-// Tab 4: HITL & Audit
-const pendingActions = ref<ComplianceAction[]>([]);
-const auditLogs = ref<AuditLogEntry[]>([]);
-const hitlApprover = ref("cro.wang");
-const hitlRole = ref("compliance_officer");
-const hitlComment = ref("经风控委员会复核确认");
+const sensitivityHeaders = computed(() => {
+  const mat = creditScore.value?.dcf_valuation.sensitivity_matrix;
+  if (!mat || mat.length === 0) return [];
+  return Object.keys(mat[0].equity_values_by_terminal_growth);
+});
 
 function clearAlerts() {
   bannerError.value = "";
   bannerSuccess.value = "";
 }
 
+function selectWatchlistIssuer(item: WatchlistIssuer) {
+  queryForm.issuer_id = item.issuer_id;
+  if (item.financials) {
+    queryForm.total_debt = item.financials.total_debt ?? queryForm.total_debt;
+    queryForm.shareholders_equity =
+      item.financials.shareholders_equity ?? queryForm.shareholders_equity;
+    queryForm.current_assets = item.financials.current_assets ?? queryForm.current_assets;
+    queryForm.current_liabilities =
+      item.financials.current_liabilities ?? queryForm.current_liabilities;
+    queryForm.ebit = item.financials.ebit ?? queryForm.ebit;
+    queryForm.interest_expense =
+      item.financials.interest_expense ?? queryForm.interest_expense;
+    queryForm.net_income = item.financials.net_income ?? queryForm.net_income;
+  }
+  queryForm.question = `Assess ${item.name} (${item.ticker}) credit quality, Z-Score & DCF valuation`;
+  runCreditScoring();
+}
+
 async function refreshOverview() {
   overview.value = await p01Api.getDashboardOverview();
+}
+
+async function loadHitlAndAudit() {
+  const [p, l] = await Promise.all([
+    p01Api.getPendingActions(),
+    p01Api.getAuditLogs(40),
+  ]);
+  pendingActions.value = p.actions;
+  auditLogs.value = l.logs;
+}
+
+async function loadGraph() {
+  graphData.value = await p01Api.getOntologyGraph(
+    graphIssuerFilter.value.trim() || undefined,
+    graphMaxDepth.value
+  );
+}
+
+async function loadWikiPages() {
+  const res = await p01Api.getWikiPages();
+  wikiPages.value = res.pages;
 }
 
 async function refreshAll() {
   clearAlerts();
   loading.value = true;
   try {
-    await Promise.all([
-      refreshOverview(),
-      loadGraph(),
-      loadWikiPages(),
-      loadHitlAndAudit(),
-    ]);
+    await Promise.all([refreshOverview(), loadHitlAndAudit(), loadGraph(), loadWikiPages()]);
+  } catch (err) {
+    bannerError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function runCreditScoring() {
+  clearAlerts();
+  loading.value = true;
+  try {
+    const res = await p01Api.scoreCredit({
+      issuer_id: queryForm.issuer_id,
+      period: queryForm.period,
+      total_debt: Number(queryForm.total_debt),
+      shareholders_equity: Number(queryForm.shareholders_equity),
+      current_assets: Number(queryForm.current_assets),
+      current_liabilities: Number(queryForm.current_liabilities),
+      ebit: Number(queryForm.ebit),
+      interest_expense: Number(queryForm.interest_expense),
+      net_income: Number(queryForm.net_income),
+      wacc: Number(queryForm.wacc),
+      terminal_growth: Number(queryForm.terminal_growth),
+    });
+    creditScore.value = res;
+    const target = watchlist.value.find((w) => w.issuer_id === res.issuer_id);
+    if (target) {
+      target.credit_rating = res.credit_rating;
+      target.risk_level = res.altman_z_score.zone;
+      target.z_score = res.altman_z_score.score;
+      target.composite_score = res.composite_score;
+    }
+    await Promise.all([refreshOverview(), loadHitlAndAudit()]);
   } catch (err) {
     bannerError.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -117,11 +250,12 @@ async function submitResearchQuery() {
         net_income: Number(queryForm.net_income),
       },
     });
+    if (queryResult.value.status === "blocked") {
+      bannerError.value = queryResult.value.reason || "Blocked by compliance guardrail";
+    } else {
+      bannerSuccess.value = `Compliance query completed (audit ${queryResult.value.audit_event_id.slice(0, 8)})`;
+    }
     await Promise.all([refreshOverview(), loadHitlAndAudit(), loadGraph()]);
-    bannerSuccess.value =
-      queryResult.value.status === "blocked"
-        ? "合规护栏已拦截高风险查询并写入审计日志"
-        : "投研分析与财务比率计算已完成";
   } catch (err) {
     bannerError.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -129,65 +263,104 @@ async function submitResearchQuery() {
   }
 }
 
-async function runDemoBatchScreen() {
+function startResearchStream() {
   clearAlerts();
-  loading.value = true;
-  try {
-    batchResult.value = await p01Api.runBatchScreen([
-      {
-        issuer_id: "issuer_alpha",
-        name: "Alpha Fin",
-        ticker: "ALPH",
-        sector: "Lending",
-        credit_rating: "BBB",
-        period: "2025-Q4",
-        financials: {
-          total_debt: 320,
-          shareholders_equity: 100,
-          current_assets: 80,
-          current_liabilities: 100,
-          ebit: 10,
-          interest_expense: 10,
-          net_income: 5,
-        },
-      },
-      {
-        issuer_id: "issuer_beta",
-        name: "Beta Pay",
-        ticker: "BETA",
-        sector: "Payments",
-        credit_rating: "A",
-        period: "2025-Q4",
-        financials: {
-          total_debt: 60,
-          shareholders_equity: 120,
-          current_assets: 180,
-          current_liabilities: 100,
-          ebit: 45,
-          interest_expense: 5,
-          net_income: 30,
-        },
-      },
-    ]);
-    await Promise.all([refreshOverview(), loadHitlAndAudit(), loadGraph()]);
-    bannerSuccess.value = `批量风险筛查完成：共 ${batchResult.value.screened_count} 家发行人，高风险 ${batchResult.value.high_risk_count} 家`;
-  } catch (err) {
-    bannerError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loading.value = false;
+  if (closeStreamFn) {
+    closeStreamFn();
+    closeStreamFn = null;
   }
-}
+  streamOutput.value = "";
+  streamStages.value = [];
+  streamStatus.value = "streaming";
 
-async function loadGraph() {
-  graphData.value = await p01Api.getOntologyGraph(
-    graphIssuerFilter.value.trim() || undefined,
-    graphMaxDepth.value
+  closeStreamFn = p01Api.streamResearchMemo(
+    {
+      issuer_id: queryForm.issuer_id || undefined,
+      question: queryForm.question,
+      period: queryForm.period,
+      total_debt: Number(queryForm.total_debt),
+      shareholders_equity: Number(queryForm.shareholders_equity),
+      current_assets: Number(queryForm.current_assets),
+      current_liabilities: Number(queryForm.current_liabilities),
+      ebit: Number(queryForm.ebit),
+      interest_expense: Number(queryForm.interest_expense),
+      net_income: Number(queryForm.net_income),
+    },
+    {
+      onStage: (data) => {
+        streamStages.value.push(data);
+      },
+      onToken: (data) => {
+        streamOutput.value += data.text;
+      },
+      onBlocked: (data) => {
+        streamStatus.value = "blocked";
+        streamOutput.value = `[GUARDRAIL BLOCKED] ${String(data.reason || "Compliance violation")}`;
+        bannerError.value = "Research stream blocked by MNPI/compliance guardrail.";
+        void Promise.all([refreshOverview(), loadHitlAndAudit()]);
+      },
+      onDone: () => {
+        if (streamStatus.value !== "blocked") {
+          streamStatus.value = "completed";
+        }
+        void Promise.all([refreshOverview(), loadHitlAndAudit()]);
+      },
+      onError: () => {
+        if (streamStatus.value === "streaming") {
+          streamStatus.value = "error";
+        }
+      },
+    }
   );
 }
 
-async function loadWikiPages() {
-  const res = await p01Api.getWikiPages();
-  wikiPages.value = res.pages;
+async function runBatchScreenAll() {
+  clearAlerts();
+  loading.value = true;
+  try {
+    const items = watchlist.value.map((w) => ({
+      issuer_id: w.issuer_id,
+      name: w.name,
+      ticker: w.ticker,
+      sector: w.sector,
+      credit_rating: w.credit_rating,
+      period: queryForm.period,
+      financials: w.financials || {},
+    }));
+    const res = await p01Api.runBatchScreen(items, queryForm.actor_role);
+    for (const r of res.results) {
+      const target = watchlist.value.find((w) => w.issuer_id === r.issuer_id);
+      if (target) {
+        target.risk_level = r.risk_level;
+      }
+    }
+    bannerSuccess.value = `Batch screened ${res.screened_count} issuers (${res.high_risk_count} high/critical risk).`;
+    await Promise.all([refreshOverview(), loadHitlAndAudit(), loadGraph()]);
+  } catch (err) {
+    bannerError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function handleHitlDecision(payload: {
+  action_id: string;
+  decision: "approve" | "reject";
+  actor_role: string;
+  approver: string;
+  comment: string;
+}) {
+  clearAlerts();
+  loading.value = true;
+  try {
+    const res = await p01Api.approveAction(payload);
+    bannerSuccess.value = res.message;
+    await Promise.all([refreshOverview(), loadHitlAndAudit()]);
+  } catch (err) {
+    bannerError.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    loading.value = false;
+  }
 }
 
 async function submitWikiIngest() {
@@ -211,8 +384,8 @@ async function submitWikiIngest() {
         },
       ],
     });
+    bannerSuccess.value = `Ingested ${ingestForm.doc_id} into Wiki & Ontology.`;
     await Promise.all([refreshOverview(), loadWikiPages(), loadGraph(), loadHitlAndAudit()]);
-    bannerSuccess.value = `文档 ${ingestForm.doc_id} 已编译入库至 LLM Wiki 与 Ontology`;
   } catch (err) {
     bannerError.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -225,36 +398,6 @@ async function runWikiLint() {
   loading.value = true;
   try {
     lintResult.value = await p01Api.lintWiki(90);
-    bannerSuccess.value = "LLM Wiki 知识库巡检完成";
-  } catch (err) {
-    bannerError.value = err instanceof Error ? err.message : String(err);
-  } finally {
-    loading.value = false;
-  }
-}
-
-async function loadHitlAndAudit() {
-  const [actRes, logRes] = await Promise.all([
-    p01Api.getPendingActions(),
-    p01Api.getAuditLogs(50),
-  ]);
-  pendingActions.value = actRes.actions;
-  auditLogs.value = logRes.logs;
-}
-
-async function decideAction(actionId: string, decision: "approve" | "reject") {
-  clearAlerts();
-  loading.value = true;
-  try {
-    const res = await p01Api.approveAction({
-      action_id: actionId,
-      decision,
-      actor_role: hitlRole.value,
-      approver: hitlApprover.value,
-      comment: hitlComment.value,
-    });
-    await Promise.all([refreshOverview(), loadHitlAndAudit()]);
-    bannerSuccess.value = res.message;
   } catch (err) {
     bannerError.value = err instanceof Error ? err.message : String(err);
   } finally {
@@ -264,540 +407,1030 @@ async function decideAction(actionId: string, decision: "approve" | "reject") {
 
 onMounted(() => {
   void refreshAll();
+  void runCreditScoring();
+});
+
+onBeforeUnmount(() => {
+  if (closeStreamFn) closeStreamFn();
 });
 </script>
 
 <template>
-  <div class="app-shell">
-    <header class="top-bar">
-      <div>
-        <h1>P01 FinTech 投研与合规智能体工作台</h1>
-        <p class="subtitle">
-          Ontology 风险图谱 · LLM Wiki 知识库 · 财务比率引擎 · PII/MNPI 护栏 · HITL 审批审计
-        </p>
+  <div class="terminal-shell">
+    <!-- Top Bloomberg/Wind Terminal Bar -->
+    <header class="terminal-topbar">
+      <div class="brand-block">
+        <span class="brand-badge">P01</span>
+        <div>
+          <h1>QUANTITATIVE CREDIT &amp; COMPLIANCE TERMINAL</h1>
+          <p class="brand-sub">OFFLINE DETERMINISTIC ENGINE · ONTOLOGY · LLM WIKI · HITL</p>
+        </div>
       </div>
-      <button class="btn btn-secondary" :disabled="loading" @click="refreshAll">
-        {{ loading ? "同步中..." : "刷新全局状态" }}
-      </button>
+
+      <div class="kpi-strip">
+        <div class="kpi-chip">
+          <span class="kpi-label">ISSUERS</span>
+          <span class="kpi-val">{{ overview.total_issuers }}</span>
+        </div>
+        <div class="kpi-chip">
+          <span class="kpi-label">SIGNALS</span>
+          <span class="kpi-val amber">{{ overview.risk_signals }}</span>
+        </div>
+        <div class="kpi-chip">
+          <span class="kpi-label">WIKI</span>
+          <span class="kpi-val">{{ overview.wiki_pages_count }}</span>
+        </div>
+        <div class="kpi-chip">
+          <span class="kpi-label">PENDING HITL</span>
+          <span class="kpi-val" :class="overview.pending_hitl_count > 0 ? 'red' : 'green'">
+            {{ overview.pending_hitl_count }}
+          </span>
+        </div>
+        <div class="kpi-chip">
+          <span class="kpi-label">AUDIT</span>
+          <span class="kpi-val">{{ overview.audit_events_count }}</span>
+        </div>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="btn-amber-outline" @click="drawerOpen = !drawerOpen">
+          {{ drawerOpen ? "CLOSE DRAWER" : "ONTOLOGY & WIKI" }}
+        </button>
+        <button class="btn-amber" :disabled="loading" @click="refreshAll">
+          {{ loading ? "SYNCING..." : "SYNC ALL" }}
+        </button>
+      </div>
     </header>
 
-    <section class="kpi-grid">
-      <div class="kpi-card">
-        <span class="kpi-label">Ontology 发行人</span>
-        <strong class="kpi-value">{{ overview.total_issuers }}</strong>
-      </div>
-      <div class="kpi-card">
-        <span class="kpi-label">风险信号数</span>
-        <strong class="kpi-value warn">{{ overview.risk_signals }}</strong>
-      </div>
-      <div class="kpi-card">
-        <span class="kpi-label">Wiki 实体页</span>
-        <strong class="kpi-value">{{ overview.wiki_pages_count }}</strong>
-      </div>
-      <div class="kpi-card">
-        <span class="kpi-label">待审批 HITL</span>
-        <strong class="kpi-value danger">{{ overview.pending_hitl_count }}</strong>
-      </div>
-      <div class="kpi-card">
-        <span class="kpi-label">审计事件总数</span>
-        <strong class="kpi-value">{{ overview.audit_events_count }}</strong>
-      </div>
-    </section>
+    <!-- Alert Banner -->
+    <div v-if="bannerError" class="alert-bar alert-error">
+      <span>[ALERT] {{ bannerError }}</span>
+      <button class="btn-mini" @click="bannerError = ''">DISMISS</button>
+    </div>
+    <div v-if="bannerSuccess" class="alert-bar alert-success">
+      <span>[OK] {{ bannerSuccess }}</span>
+      <button class="btn-mini" @click="bannerSuccess = ''">DISMISS</button>
+    </div>
 
-    <div v-if="bannerError" class="alert alert-error">{{ bannerError }}</div>
-    <div v-if="bannerSuccess" class="alert alert-success">{{ bannerSuccess }}</div>
+    <!-- 3-Column Quantitative Terminal Grid -->
+    <main class="terminal-grid">
+      <!-- Left: Issuer Watchlist -->
+      <TickerWatchlist
+        :issuers="watchlist"
+        :selected-issuer-id="queryForm.issuer_id"
+        :loading="loading"
+        @select-issuer="selectWatchlistIssuer"
+        @run-batch-screen="runBatchScreenAll"
+      />
 
-    <nav class="tab-bar">
-      <button
-        :class="['tab-btn', { active: activeTab === 'workbench' }]"
-        @click="activeTab = 'workbench'"
-      >
-        投研合规工作台
-      </button>
-      <button
-        :class="['tab-btn', { active: activeTab === 'ontology' }]"
-        @click="activeTab = 'ontology'"
-      >
-        Ontology 风险图谱
-      </button>
-      <button
-        :class="['tab-btn', { active: activeTab === 'wiki' }]"
-        @click="activeTab = 'wiki'"
-      >
-        LLM Wiki 知识库与巡检
-      </button>
-      <button
-        :class="['tab-btn', { active: activeTab === 'hitl' }]"
-        @click="activeTab = 'hitl'"
-      >
-        HITL 审批与审计中心
-      </button>
-    </nav>
-
-    <!-- Tab 1: 投研合规工作台 -->
-    <main v-if="activeTab === 'workbench'" class="panel-grid">
-      <section class="card">
-        <h2>单发行人投研查询与财务比率风控</h2>
-        <div class="form-row">
-          <label>
-            发行人 ID
-            <input v-model="queryForm.issuer_id" placeholder="issuer_alpha" />
-          </label>
-          <label>
-            角色
-            <input v-model="queryForm.actor_role" placeholder="analyst" />
-          </label>
-          <label>
-            报告期
-            <input v-model="queryForm.period" placeholder="2025-Q4" />
-          </label>
-        </div>
-        <label class="full-width">
-          投研问题 (内置 PII 脱敏与 MNPI 内幕交易拦截)
-          <textarea v-model="queryForm.question" rows="2"></textarea>
-        </label>
-        <div class="form-row">
-          <label>总负债 <input v-model.number="queryForm.total_debt" type="number" /></label>
-          <label>股东权益 <input v-model.number="queryForm.shareholders_equity" type="number" /></label>
-          <label>流动资产 <input v-model.number="queryForm.current_assets" type="number" /></label>
-          <label>流动负债 <input v-model.number="queryForm.current_liabilities" type="number" /></label>
-          <label>EBIT <input v-model.number="queryForm.ebit" type="number" /></label>
-          <label>利息费用 <input v-model.number="queryForm.interest_expense" type="number" /></label>
-        </div>
-        <div class="actions-row">
-          <button class="btn btn-primary" :disabled="loading" @click="submitResearchQuery">
-            执行投研分析
-          </button>
-          <button class="btn btn-secondary" :disabled="loading" @click="runDemoBatchScreen">
-            运行多发行人批量风险筛查
-          </button>
-        </div>
-
-        <div v-if="queryResult" class="result-box">
-          <h3>分析结果 ({{ queryResult.status }})</h3>
-          <p v-if="queryResult.reason" class="text-danger">{{ queryResult.reason }}</p>
-          <p v-if="queryResult.question"><strong>脱敏后问题：</strong>{{ queryResult.question }}</p>
-          <p v-if="queryResult.guardrail?.findings?.length">
-            <strong>护栏命中：</strong>{{ queryResult.guardrail.findings.join(", ") }}
-          </p>
-          <div v-if="queryResult.ratios">
-            <strong>财务比率：</strong>
-            <code>{{ JSON.stringify(queryResult.ratios.ratios) }}</code>
-            <ul v-if="queryResult.ratios.triggered_risks.length">
-              <li v-for="(r, idx) in queryResult.ratios.triggered_risks" :key="idx">
-                [{{ r.severity }}] {{ r.category }}: {{ r.description }}
-              </li>
-            </ul>
+      <!-- Center: Quant Credit & Streaming Research -->
+      <section class="terminal-panel center-workspace">
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <span class="panel-dot"></span>
+            <h2>QUANT CREDIT &amp; STREAMING RESEARCH</h2>
           </div>
-          <p v-if="queryResult.hitl_pending_action" class="text-warn">
-            已自动触发 HITL 审批动作：{{ queryResult.hitl_pending_action.action_id }}
-            ({{ queryResult.hitl_pending_action.action_type }})
-          </p>
-        </div>
-      </section>
-
-      <section v-if="batchResult" class="card">
-        <h2>批量风险筛查结果 ({{ batchResult.screened_count }} 家)</h2>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>发行人</th>
-              <th>风险等级</th>
-              <th>核心比率</th>
-              <th>HITL 动作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="item in batchResult.results" :key="item.issuer_id">
-              <td>{{ item.name }} ({{ item.issuer_id }})</td>
-              <td>
-                <span :class="['badge', item.risk_level.toLowerCase()]">{{ item.risk_level }}</span>
-              </td>
-              <td><code>{{ JSON.stringify(item.ratios) }}</code></td>
-              <td>
-                {{ item.hitl_pending_action ? item.hitl_pending_action.action_type : "无需审批" }}
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-    </main>
-
-    <!-- Tab 2: Ontology 风险图谱 -->
-    <main v-if="activeTab === 'ontology'" class="card">
-      <h2>Ontology 实体与风险传导图谱</h2>
-      <div class="form-row">
-        <label>
-          按发行人过滤 (留空查看全图)
-          <input v-model="graphIssuerFilter" placeholder="issuer_alpha" />
-        </label>
-        <label>
-          遍历深度
-          <input v-model.number="graphMaxDepth" type="number" min="1" max="5" />
-        </label>
-        <div class="align-end">
-          <button class="btn btn-primary" :disabled="loading" @click="loadGraph">查询图谱</button>
-        </div>
-      </div>
-
-      <div class="split-grid">
-        <div>
-          <h3>节点 ({{ graphData.nodes.length }})</h3>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>类型</th>
-                <th>名称/属性</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="node in graphData.nodes" :key="node.id">
-                <td><code>{{ node.id }}</code></td>
-                <td>{{ node.type || "-" }}</td>
-                <td>{{ node.name || node.action_type || node.category || "-" }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <div>
-          <h3>关系边 ({{ graphData.edges.length }})</h3>
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>源节点</th>
-                <th>关系</th>
-                <th>目标节点</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(edge, idx) in graphData.edges" :key="idx">
-                <td><code>{{ edge.source_id }}</code></td>
-                <td><span class="badge">{{ edge.relation }}</span></td>
-                <td><code>{{ edge.target_id }}</code></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </main>
-
-    <!-- Tab 3: LLM Wiki 知识库与巡检 -->
-    <main v-if="activeTab === 'wiki'" class="panel-grid">
-      <section class="card">
-        <h2>文档入库与 Wiki 编译</h2>
-        <div class="form-row">
-          <label>文档 ID <input v-model="ingestForm.doc_id" /></label>
-          <label>标题 <input v-model="ingestForm.title" /></label>
-          <label>实体 ID <input v-model="ingestForm.entity_id" /></label>
-          <label>实体名称 <input v-model="ingestForm.entity_name" /></label>
-        </div>
-        <label class="full-width">
-          文档正文 (支持 [[wiki_link]] 双向链接)
-          <textarea v-model="ingestForm.content" rows="2"></textarea>
-        </label>
-        <div class="actions-row">
-          <button class="btn btn-primary" :disabled="loading" @click="submitWikiIngest">
-            入库并编译 Wiki
-          </button>
-          <button class="btn btn-secondary" :disabled="loading" @click="runWikiLint">
-            运行知识库 Lint 巡检
-          </button>
+          <span class="mono-tag">{{ queryForm.issuer_id.toUpperCase() }} // {{ queryForm.period }}</span>
         </div>
 
-        <div v-if="lintResult" class="result-box">
-          <h3>Lint 巡检报告 ({{ lintResult.status }})</h3>
-          <p>
-            总页数: {{ lintResult.total_pages }} · 孤立页: {{ lintResult.orphan_pages.length }} ·
-            断链: {{ lintResult.broken_links.length }} · 指标冲突:
-            {{ lintResult.conflicting_metrics.length }} · 过期条目:
-            {{ lintResult.stale_entries.length }}
-          </p>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>已编译 Wiki 页面 ({{ wikiPages.length }})</h2>
-        <div v-if="wikiPages.length === 0" class="empty-state">暂无 Wiki 页面，请先入库文档。</div>
-        <div v-for="page in wikiPages" :key="page.id" class="wiki-item">
-          <div class="wiki-header">
-            <strong>{{ page.title }}</strong>
-            <code>{{ page.path }}</code>
+        <!-- Financial Parameters & Query Bar -->
+        <div class="workspace-controls">
+          <div class="params-grid">
+            <label class="param-field">
+              <span>ISSUER ID</span>
+              <input v-model="queryForm.issuer_id" class="terminal-input" />
+            </label>
+            <label class="param-field">
+              <span>PERIOD</span>
+              <input v-model="queryForm.period" class="terminal-input" />
+            </label>
+            <label class="param-field">
+              <span>TOTAL DEBT</span>
+              <input v-model.number="queryForm.total_debt" type="number" class="terminal-input" />
+            </label>
+            <label class="param-field">
+              <span>EQUITY</span>
+              <input v-model.number="queryForm.shareholders_equity" type="number" class="terminal-input" />
+            </label>
+            <label class="param-field">
+              <span>CURR ASSETS</span>
+              <input v-model.number="queryForm.current_assets" type="number" class="terminal-input" />
+            </label>
+            <label class="param-field">
+              <span>CURR LIAB</span>
+              <input v-model.number="queryForm.current_liabilities" type="number" class="terminal-input" />
+            </label>
+            <label class="param-field">
+              <span>EBIT</span>
+              <input v-model.number="queryForm.ebit" type="number" class="terminal-input" />
+            </label>
+            <label class="param-field">
+              <span>INTEREST EXP</span>
+              <input v-model.number="queryForm.interest_expense" type="number" class="terminal-input" />
+            </label>
+            <label class="param-field">
+              <span>NET INCOME</span>
+              <input v-model.number="queryForm.net_income" type="number" class="terminal-input" />
+            </label>
           </div>
-          <p class="wiki-preview">{{ page.preview }}</p>
+
+          <div class="query-bar">
+            <input
+              v-model="queryForm.question"
+              class="terminal-input query-input"
+              placeholder="Enter research or compliance prompt..."
+            />
+            <button class="btn-amber" :disabled="loading" @click="runCreditScoring">
+              SCORE CREDIT
+            </button>
+            <button class="btn-cyan" @click="startResearchStream">
+              STREAM MEMO (SSE)
+            </button>
+            <button class="btn-amber-outline" :disabled="loading" @click="submitResearchQuery">
+              COMPLIANCE QUERY
+            </button>
+          </div>
+        </div>
+
+        <!-- Quant Engine Results -->
+        <div class="workspace-scroll">
+          <div v-if="creditScore" class="quant-cards-grid">
+            <!-- Credit Tier Card -->
+            <div class="quant-card highlight-card">
+              <div class="card-label">IMPLIED CREDIT TIER</div>
+              <div class="rating-hero">
+                <span class="rating-grade">{{ creditScore.credit_rating }}</span>
+                <div class="rating-meta">
+                  <div>COMPOSITE: <strong>{{ creditScore.composite_score }}/100</strong></div>
+                  <div>OAS SPREAD: <strong>{{ creditScore.implied_spread_bps }} bps</strong></div>
+                  <div>1Y PD: <strong>{{ creditScore.probability_of_default_1y_pct }}%</strong></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Altman Z-Score -->
+            <div class="quant-card">
+              <div class="card-label">ALTMAN Z-SCORE</div>
+              <div class="metric-hero">
+                <span class="metric-num">{{ creditScore.altman_z_score.score }}</span>
+                <span class="zone-pill" :class="`zone-${creditScore.altman_z_score.zone.toLowerCase()}`">
+                  {{ creditScore.altman_z_score.zone }}
+                </span>
+              </div>
+              <div class="sub-metrics">
+                <span>LEV SCORE: {{ creditScore.sub_scores.leverage_score }}</span>
+                <span>LIQ SCORE: {{ creditScore.sub_scores.liquidity_score }}</span>
+              </div>
+            </div>
+
+            <!-- Piotroski F-Score -->
+            <div class="quant-card">
+              <div class="card-label">PIOTROSKI F-SCORE</div>
+              <div class="metric-hero">
+                <span class="metric-num">
+                  {{ creditScore.piotroski_f_score.score }} / {{ creditScore.piotroski_f_score.max_score }}
+                </span>
+              </div>
+              <div class="criteria-pills">
+                <span
+                  v-for="(ok, key) in creditScore.piotroski_f_score.criteria"
+                  :key="key"
+                  class="crit-pill"
+                  :class="ok ? 'crit-pass' : 'crit-fail'"
+                  :title="String(key)"
+                >
+                  {{ ok ? "✓" : "✕" }} {{ String(key).replace(/_/g, " ") }}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- DCF Valuation Sensitivity Matrix -->
+          <div v-if="creditScore" class="dcf-panel">
+            <div class="dcf-header">
+              <span>DCF VALUATION &amp; SENSITIVITY MATRIX (WACC vs TERMINAL GROWTH)</span>
+              <span class="mono-tag">
+                BASE EV: {{ creditScore.dcf_valuation.enterprise_value }} · EQ VAL:
+                {{ creditScore.dcf_valuation.implied_equity_value }}
+              </span>
+            </div>
+            <table class="dcf-table">
+              <thead>
+                <tr>
+                  <th>WACC \ g</th>
+                  <th v-for="g in sensitivityHeaders" :key="g">{{ g }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in creditScore.dcf_valuation.sensitivity_matrix" :key="row.wacc">
+                  <td class="wacc-col">{{ row.wacc }}</td>
+                  <td v-for="g in sensitivityHeaders" :key="g">
+                    {{ row.equity_values_by_terminal_growth[g] }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- SSE Streaming Research Console -->
+          <div class="stream-console">
+            <div class="stream-header">
+              <span>LIVE RESEARCH STREAM (SSE)</span>
+              <span class="stream-status" :class="`st-${streamStatus}`">
+                {{ streamStatus.toUpperCase() }}
+              </span>
+            </div>
+            <div v-if="streamStages.length > 0" class="stage-strip">
+              <span v-for="(st, idx) in streamStages" :key="idx" class="stage-pill">
+                {{ String(st.stage || "stage") }}: {{ String(st.status || st.credit_rating || "ok") }}
+              </span>
+            </div>
+            <pre class="stream-body">{{ streamOutput || "Click 'STREAM MEMO (SSE)' to stream deterministic research & compliance analysis..." }}</pre>
+          </div>
         </div>
       </section>
+
+      <!-- Right: Compliance Blotter & Audit Stream -->
+      <ComplianceBlotter
+        :pending-actions="pendingActions"
+        :audit-logs="auditLogs"
+        :loading="loading"
+        @decide-action="handleHitlDecision"
+        @refresh-blotter="loadHitlAndAudit"
+      />
     </main>
 
-    <!-- Tab 4: HITL 审批与审计中心 -->
-    <main v-if="activeTab === 'hitl'" class="panel-grid">
-      <section class="card">
-        <h2>待审批 HITL 合规动作 ({{ pendingActions.length }})</h2>
-        <div class="form-row">
-          <label>审批人 <input v-model="hitlApprover" /></label>
-          <label>审批角色 <input v-model="hitlRole" /></label>
-          <label>审批意见 <input v-model="hitlComment" /></label>
+    <!-- Slide-over Ontology & Wiki Drawer -->
+    <div v-if="drawerOpen" class="drawer-backdrop" @click.self="drawerOpen = false">
+      <div class="terminal-drawer">
+        <div class="panel-header">
+          <div class="panel-title-group">
+            <span class="panel-dot"></span>
+            <h2>ONTOLOGY &amp; LLM WIKI DRAWER</h2>
+          </div>
+          <div class="drawer-tabs">
+            <button
+              class="btn-mini"
+              :class="{ active: drawerTab === 'ontology' }"
+              @click="drawerTab = 'ontology'"
+            >
+              ONTOLOGY GRAPH
+            </button>
+            <button
+              class="btn-mini"
+              :class="{ active: drawerTab === 'wiki' }"
+              @click="drawerTab = 'wiki'"
+            >
+              LLM WIKI &amp; LINT
+            </button>
+            <button class="btn-mini" @click="drawerOpen = false">CLOSE</button>
+          </div>
         </div>
 
-        <div v-if="pendingActions.length === 0" class="empty-state">当前无待审批 HITL 动作。</div>
-        <table v-else class="data-table">
-          <thead>
-            <tr>
-              <th>Action ID</th>
-              <th>发行人</th>
-              <th>动作类型</th>
-              <th>依据</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="act in pendingActions" :key="act.action_id">
-              <td><code>{{ act.action_id }}</code></td>
-              <td>{{ act.issuer_id }}</td>
-              <td><span class="badge high">{{ act.action_type }}</span></td>
-              <td>{{ act.rationale }}</td>
-              <td class="actions-cell">
-                <button class="btn btn-primary btn-sm" @click="decideAction(act.action_id, 'approve')">
-                  批准
-                </button>
-                <button class="btn btn-danger btn-sm" @click="decideAction(act.action_id, 'reject')">
-                  驳回
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+        <div v-if="drawerTab === 'ontology'" class="drawer-body">
+          <div class="drawer-toolbar">
+            <input
+              v-model="graphIssuerFilter"
+              class="terminal-input"
+              placeholder="Filter root issuer_id..."
+            />
+            <input
+              v-model.number="graphMaxDepth"
+              type="number"
+              min="1"
+              max="5"
+              class="terminal-input depth-input"
+            />
+            <button class="btn-amber" @click="loadGraph">TRAVERSE</button>
+          </div>
+          <div class="drawer-split">
+            <div class="drawer-box">
+              <h3>NODES ({{ graphData.nodes.length }})</h3>
+              <div v-for="n in graphData.nodes" :key="n.id" class="graph-item">
+                <span class="mono-gold">{{ n.id }}</span>
+                <span class="graph-type">{{ n.type || "Node" }}</span>
+              </div>
+            </div>
+            <div class="drawer-box">
+              <h3>EDGES ({{ graphData.edges.length }})</h3>
+              <div
+                v-for="(e, i) in graphData.edges"
+                :key="`${e.source_id}-${e.target_id}-${i}`"
+                class="graph-item"
+              >
+                <span>{{ e.source_id }}</span>
+                <span class="mono-gold">--[{{ e.relation }}]--&gt;</span>
+                <span>{{ e.target_id }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
 
-      <section class="card">
-        <h2>JSONL 不可篡改审计日志 (最近 {{ auditLogs.length }} 条)</h2>
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>时间</th>
-              <th>事件类型</th>
-              <th>事件 ID</th>
-              <th>详情</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="log in auditLogs" :key="log.event_id">
-              <td>{{ log.timestamp }}</td>
-              <td><span class="badge">{{ log.event_type }}</span></td>
-              <td><code>{{ log.event_id }}</code></td>
-              <td><code>{{ JSON.stringify(log) }}</code></td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-    </main>
+        <div v-else class="drawer-body">
+          <div class="drawer-split">
+            <div class="drawer-box">
+              <h3>INGEST DOCUMENT TO WIKI</h3>
+              <div class="ingest-grid">
+                <input v-model="ingestForm.doc_id" class="terminal-input" placeholder="doc_id" />
+                <input v-model="ingestForm.title" class="terminal-input" placeholder="title" />
+                <input v-model="ingestForm.entity_id" class="terminal-input" placeholder="entity_id" />
+                <input v-model="ingestForm.entity_name" class="terminal-input" placeholder="entity_name" />
+                <textarea v-model="ingestForm.content" class="terminal-input" rows="3"></textarea>
+                <div class="drawer-toolbar">
+                  <button class="btn-amber" :disabled="loading" @click="submitWikiIngest">
+                    INGEST TO WIKI
+                  </button>
+                  <button class="btn-amber-outline" :disabled="loading" @click="runWikiLint">
+                    RUN LINT
+                  </button>
+                </div>
+              </div>
+              <pre v-if="lintResult" class="lint-pre">{{ JSON.stringify(lintResult, null, 2) }}</pre>
+            </div>
+            <div class="drawer-box">
+              <h3>WIKI ENTITY PAGES ({{ wikiPages.length }})</h3>
+              <div v-for="p in wikiPages" :key="p.id" class="wiki-item">
+                <div class="mono-gold">{{ p.title }} ({{ p.id }})</div>
+                <div class="wiki-preview">{{ p.preview }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
-<style scoped>
-:global(body) {
+<style>
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
   margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
-  background: #f4f6f9;
-  color: #1e293b;
+  background: #0a0e17;
+  color: #e2e8f0;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
-.app-shell {
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: 20px;
+
+.terminal-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #0a0e17;
+  color: #e2e8f0;
+  overflow: hidden;
 }
-.top-bar {
+
+.terminal-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  background: #070a11;
+  border-bottom: 1px solid #1e293b;
+}
+
+.brand-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-badge {
+  font-family: "JetBrains Mono", monospace;
+  font-weight: 800;
+  font-size: 13px;
+  background: #f59e0b;
+  color: #0a0e17;
+  padding: 4px 8px;
+  border-radius: 3px;
+}
+
+.brand-block h1 {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: #f8fafc;
+}
+
+.brand-sub {
+  margin: 2px 0 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: #64748b;
+}
+
+.kpi-strip {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kpi-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #0f1624;
+  border: 1px solid #1e293b;
+  padding: 4px 9px;
+  border-radius: 3px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.kpi-label {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.kpi-val {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.kpi-val.amber {
+  color: #f59e0b;
+}
+.kpi-val.red {
+  color: #f87171;
+}
+.kpi-val.green {
+  color: #34d399;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.alert-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+}
+
+.alert-error {
+  background: rgba(239, 68, 68, 0.14);
+  color: #fca5a5;
+  border-bottom: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.alert-success {
+  background: rgba(16, 185, 129, 0.14);
+  color: #6ee7b7;
+  border-bottom: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.terminal-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 270px 1fr 330px;
+  gap: 8px;
+  padding: 8px;
+  background: #05080f;
+}
+
+.terminal-panel {
+  background: #0a0e17;
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #0d1320;
+  border-bottom: 1px solid #1e293b;
+}
+
+.panel-title-group {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.panel-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #f59e0b;
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #e2e8f0;
+}
+
+.count-pill {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #172033;
+  color: #f59e0b;
+  border: 1px solid #263147;
+}
+
+.terminal-input {
+  width: 100%;
+  background: #070b12;
+  border: 1px solid #263147;
+  border-radius: 3px;
+  color: #f8fafc;
+  padding: 6px 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  outline: none;
+}
+
+.terminal-input:focus {
+  border-color: #f59e0b;
+}
+
+.btn-amber {
+  background: #f59e0b;
+  color: #0a0e17;
+  border: none;
+  border-radius: 3px;
+  padding: 6px 12px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-amber:hover:not(:disabled) {
+  background: #fbbf24;
+}
+
+.btn-amber-outline {
+  background: transparent;
+  color: #f59e0b;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  border-radius: 3px;
+  padding: 6px 10px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-amber-outline:hover:not(:disabled) {
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.btn-cyan {
+  background: rgba(56, 189, 248, 0.16);
+  color: #38bdf8;
+  border: 1px solid rgba(56, 189, 248, 0.45);
+  border-radius: 3px;
+  padding: 6px 12px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-cyan:hover {
+  background: rgba(56, 189, 248, 0.25);
+}
+
+.btn-mini {
+  background: #131c2e;
+  color: #cbd5e1;
+  border: 1px solid #263147;
+  border-radius: 3px;
+  padding: 3px 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.btn-mini.active {
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+
+.empty-state {
+  padding: 18px;
+  text-align: center;
+  font-size: 11px;
+  color: #64748b;
+}
+
+/* Center Workspace */
+.center-workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.mono-tag {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: #f59e0b;
+}
+
+.workspace-controls {
+  padding: 10px 12px;
+  border-bottom: 1px solid #1e293b;
+  background: #080c14;
+}
+
+.params-grid {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.param-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: #64748b;
+}
+
+.query-bar {
+  display: flex;
+  gap: 6px;
+}
+
+.query-input {
+  flex: 1;
+}
+
+.workspace-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quant-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quant-card {
+  background: #0d1320;
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.highlight-card {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.card-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.rating-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.rating-grade {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 28px;
+  font-weight: 800;
+  color: #f59e0b;
+}
+
+.rating-meta {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.metric-hero {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.metric-num {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 24px;
+  font-weight: 800;
+  color: #f8fafc;
+}
+
+.zone-pill {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 3px;
+}
+
+.zone-safe {
+  background: rgba(16, 185, 129, 0.16);
+  color: #34d399;
+}
+.zone-grey {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+}
+.zone-distress {
+  background: rgba(239, 68, 68, 0.18);
+  color: #f87171;
+}
+
+.sub-metrics {
+  display: flex;
+  justify-content: space-between;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: #94a3b8;
+  margin-top: 8px;
+}
+
+.criteria-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.crit-pill {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 2px;
+}
+
+.crit-pass {
+  background: rgba(16, 185, 129, 0.14);
+  color: #34d399;
+}
+
+.crit-fail {
+  background: rgba(239, 68, 68, 0.14);
+  color: #f87171;
+}
+
+.dcf-panel {
+  background: #0d1320;
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.dcf-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+
+.dcf-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+}
+
+.dcf-table th,
+.dcf-table td {
+  border: 1px solid #1e293b;
+  padding: 5px 8px;
+  text-align: right;
+}
+
+.dcf-table th {
+  background: #070b12;
+  color: #f59e0b;
+}
+
+.wacc-col {
+  text-align: left !important;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.stream-console {
+  flex: 1;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  background: #060910;
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.stream-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 18px;
+  padding: 6px 10px;
+  background: #0d1320;
+  border-bottom: 1px solid #1e293b;
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
 }
-h1 {
+
+.stream-status {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+
+.st-streaming {
+  background: rgba(56, 189, 248, 0.2);
+  color: #38bdf8;
+}
+.st-completed {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+.st-blocked,
+.st-error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+.st-idle {
+  background: #1e293b;
+  color: #94a3b8;
+}
+
+.stage-strip {
+  display: flex;
+  gap: 6px;
+  padding: 5px 10px;
+  border-bottom: 1px solid #131c2e;
+  flex-wrap: wrap;
+}
+
+.stage-pill {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 1px 6px;
+  border-radius: 2px;
+}
+
+.stream-body {
   margin: 0;
-  font-size: 1.5rem;
+  padding: 10px;
+  flex: 1;
+  overflow-y: auto;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #cbd5e1;
+  white-space: pre-wrap;
 }
-.subtitle {
-  margin: 4px 0 0;
-  color: #64748b;
-  font-size: 0.9rem;
+
+/* Drawer */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 14, 0.72);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 40;
 }
-.kpi-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
-}
-.kpi-card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 14px 16px;
+
+.terminal-drawer {
+  width: min(820px, 92vw);
+  height: 100%;
+  background: #0a0e17;
+  border-left: 1px solid #f59e0b;
   display: flex;
   flex-direction: column;
+}
+
+.drawer-tabs {
+  display: flex;
   gap: 6px;
 }
-.kpi-label {
-  font-size: 0.82rem;
-  color: #64748b;
+
+.drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
-.kpi-value {
-  font-size: 1.5rem;
-  color: #0f172a;
-}
-.kpi-value.warn { color: #d97706; }
-.kpi-value.danger { color: #dc2626; }
-.tab-bar {
+
+.drawer-toolbar {
   display: flex;
   gap: 8px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
 }
-.tab-btn {
-  padding: 9px 16px;
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  border-radius: 8px;
-  cursor: pointer;
-  font-weight: 600;
-  color: #334155;
+
+.depth-input {
+  width: 72px;
 }
-.tab-btn.active {
-  background: #1d4ed8;
-  color: #fff;
-  border-color: #1d4ed8;
-}
-.panel-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.split-grid {
+
+.drawer-split {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
-  gap: 16px;
-}
-.card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  padding: 18px;
-}
-.card h2 {
-  margin: 0 0 14px;
-  font-size: 1.15rem;
-}
-.form-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
-}
-label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 0.85rem;
-  color: #475569;
-}
-.full-width {
-  margin-bottom: 12px;
-}
-input, textarea {
-  padding: 8px 10px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  font-size: 0.9rem;
-}
-.actions-row {
-  display: flex;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
-  flex-wrap: wrap;
 }
-.align-end {
-  display: flex;
-  align-items: flex-end;
+
+.drawer-box {
+  background: #0d1320;
+  border: 1px solid #1e293b;
+  border-radius: 4px;
+  padding: 10px;
 }
-.btn {
-  padding: 8px 14px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  font-weight: 600;
+
+.drawer-box h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: #94a3b8;
+  letter-spacing: 0.06em;
 }
-.btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-.btn-primary { background: #1d4ed8; color: #fff; }
-.btn-secondary { background: #e2e8f0; color: #1e293b; }
-.btn-danger { background: #dc2626; color: #fff; }
-.btn-sm { padding: 5px 10px; font-size: 0.8rem; }
-.actions-cell {
-  display: flex;
-  gap: 6px;
-}
-.alert {
-  padding: 10px 14px;
-  border-radius: 8px;
-  margin-bottom: 12px;
-  font-size: 0.9rem;
-}
-.alert-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
-.alert-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
-.result-box {
-  margin-top: 14px;
-  padding: 12px;
-  background: #f8fafc;
-  border: 1px solid #e2e8f0;
-  border-radius: 8px;
-}
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.85rem;
-}
-.data-table th, .data-table td {
-  border-bottom: 1px solid #e2e8f0;
-  padding: 8px 10px;
-  text-align: left;
-  vertical-align: top;
-}
-.data-table th {
-  background: #f8fafc;
-  color: #475569;
-}
-.badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  background: #e2e8f0;
-  color: #334155;
-}
-.badge.low { background: #dcfce7; color: #166534; }
-.badge.high { background: #fef3c7; color: #92400e; }
-.badge.critical { background: #fee2e2; color: #991b1b; }
+
+.graph-item,
 .wiki-item {
-  padding: 10px 0;
-  border-bottom: 1px solid #e2e8f0;
-}
-.wiki-header {
+  padding: 5px 0;
+  border-bottom: 1px solid #162033;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
+
+.wiki-item {
+  flex-direction: column;
+}
+
 .wiki-preview {
-  margin: 6px 0 0;
-  font-size: 0.85rem;
-  color: #475569;
+  font-size: 10px;
+  color: #94a3b8;
 }
-.empty-state {
-  color: #64748b;
-  font-size: 0.9rem;
-  padding: 12px 0;
+
+.mono-gold {
+  color: #f59e0b;
 }
-.text-danger { color: #dc2626; }
-.text-warn { color: #d97706; font-weight: 600; }
+
+.ingest-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lint-pre {
+  margin-top: 8px;
+  background: #070b12;
+  padding: 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  overflow-x: auto;
+}
+
+@media (max-width: 1180px) {
+  .terminal-grid {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  .params-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .quant-cards-grid {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

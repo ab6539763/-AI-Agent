@@ -48,6 +48,74 @@ export interface OpsLinkItem {
   target_id: string;
 }
 
+export type WorkOrderStatus =
+  | "OPEN"
+  | "ASSIGNED"
+  | "LOCKOUT_TAGOUT"
+  | "VERIFIED"
+  | "CLOSED";
+
+export interface WorkOrderHistoryEntry {
+  from_status: string | null;
+  to_status: string;
+  actor: string;
+  timestamp: string;
+  notes: string;
+}
+
+export interface WorkOrderItem {
+  work_order_id: string;
+  equipment_id: string;
+  title: string;
+  fault_code?: string | null;
+  sop_id?: string | null;
+  priority: string;
+  status: WorkOrderStatus;
+  assigned_to?: string | null;
+  loto_tag_id?: string | null;
+  verified_by?: string | null;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  history: WorkOrderHistoryEntry[];
+}
+
+export interface TelemetryMetricStats {
+  metric: string;
+  latest_value: number;
+  rolling_mean: number;
+  rolling_std: number;
+  z_score: number;
+  is_anomaly: boolean;
+  sample_count: number;
+  history: number[];
+}
+
+export interface TelemetryAnomaly {
+  equipment_id: string;
+  metric: string;
+  value: number;
+  rolling_mean: number;
+  rolling_std: number;
+  z_score: number;
+  z_threshold: number;
+  timestamp: string;
+}
+
+export interface TelemetryBatchResponse {
+  ingested_count: number;
+  anomaly_count: number;
+  anomalies: TelemetryAnomaly[];
+  results: Array<{
+    equipment_id: string;
+    timestamp: string;
+    metrics: TelemetryMetricStats[];
+    anomalies: TelemetryAnomaly[];
+    anomaly_detected: boolean;
+  }>;
+  equipment_snapshots: Record<string, Record<string, TelemetryMetricStats>>;
+}
+
 export interface DashboardOverview {
   service: string;
   equipment_count: number;
@@ -61,6 +129,8 @@ export interface DashboardOverview {
   fault_codes: FaultCodeItem[];
   sops: MaintenanceSOPItem[];
   links: OpsLinkItem[];
+  work_orders?: WorkOrderItem[];
+  telemetry_snapshots?: Record<string, Record<string, TelemetryMetricStats>>;
 }
 
 export interface SensorAlertItem {
@@ -256,5 +326,54 @@ export const apiClient = {
 
   getAuditLogs(): Promise<{ logs: AuditLogEntry[]; total: number }> {
     return request<{ logs: AuditLogEntry[]; total: number }>("/api/v1/audit/logs");
+  },
+
+  ingestTelemetryBatch(
+    samples: Array<{
+      equipment_id: string;
+      readings: Record<string, number>;
+      timestamp?: string;
+    }>
+  ): Promise<TelemetryBatchResponse> {
+    return request<TelemetryBatchResponse>("/api/v1/telemetry/ingest-batch", {
+      method: "POST",
+      body: JSON.stringify({ samples }),
+    });
+  },
+
+  listWorkOrders(): Promise<{ work_orders: WorkOrderItem[]; total: number }> {
+    return request<{ work_orders: WorkOrderItem[]; total: number }>("/api/v1/workorders");
+  },
+
+  createWorkOrder(payload: {
+    equipment_id: string;
+    title: string;
+    fault_code?: string | null;
+    sop_id?: string | null;
+    priority?: string;
+    actor?: string;
+    notes?: string;
+  }): Promise<{ work_order: WorkOrderItem }> {
+    return request<{ work_order: WorkOrderItem }>("/api/v1/workorders", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  transitionWorkOrder(payload: {
+    work_order_id: string;
+    target_status: WorkOrderStatus;
+    actor?: string;
+    assigned_to?: string;
+    loto_tag_id?: string;
+    notes?: string;
+  }): Promise<{ work_order: WorkOrderItem; audit_trail_count: number }> {
+    return request<{ work_order: WorkOrderItem; audit_trail_count: number }>(
+      "/api/v1/workorders/transition",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    );
   },
 };

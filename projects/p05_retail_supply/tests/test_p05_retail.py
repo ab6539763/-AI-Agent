@@ -314,3 +314,114 @@ def test_enterprise_margin_simulation_endpoint_and_guardrail(tmp_path: Path) -> 
     )
     assert bad_sim.status_code == 404
 
+
+def test_eoq_optimizer_safety_stock_and_tradeoff_curve() -> None:
+    from app.supply_optimizer import EOQOptimizer
+
+    registry = RetailOntologyRegistry()
+    registry.seed_demo_data()
+    optimizer = EOQOptimizer()
+
+    res_95 = optimizer.optimize_registry(
+        registry,
+        sku_id="SKU-1001",
+        ordering_cost=85.0,
+        holding_cost_rate=0.24,
+        service_level=0.95,
+    )
+    assert res_95.total_skus == 1
+    item_95 = res_95.items[0]
+    assert item_95.sku_id == "SKU-1001"
+    assert item_95.recommended_order_qty >= 50  # respects supplier MOQ
+    assert item_95.reorder_point > item_95.safety_stock
+    assert item_95.needs_replenishment is True  # current_stock=35 <= reorder_point
+    assert len(item_95.tradeoff_curve) == 6
+    assert item_95.total_relevant_cost == round(
+        item_95.annual_ordering_cost
+        + item_95.annual_holding_cost
+        + item_95.annual_stockout_cost,
+        2,
+    )
+
+    # Higher service level (99%) increases safety stock & holding cost while reducing stockout cost
+    res_99 = optimizer.optimize_registry(
+        registry,
+        sku_id="SKU-1001",
+        ordering_cost=85.0,
+        holding_cost_rate=0.24,
+        service_level=0.99,
+    )
+    item_99 = res_99.items[0]
+    assert item_99.safety_stock > item_95.safety_stock
+    assert item_99.annual_holding_cost > item_95.annual_holding_cost
+    assert item_99.annual_stockout_cost < item_95.annual_stockout_cost
+
+
+def test_warehouse_allocator_rebalances_surplus_to_deficit() -> None:
+    from app.supply_optimizer import WarehouseAllocator
+
+    registry = RetailOntologyRegistry()
+    registry.seed_demo_data()
+    allocator = WarehouseAllocator()
+
+    # WH-WEST has huge surplus of SKU-1001 & SKU-1003; WH-EAST is in deficit
+    custom_matrix = {
+        "SKU-1001": {"WH-EAST": 20, "WH-WEST": 180},
+        "SKU-1002": {"WH-EAST": 120, "WH-WEST": 140},
+        "SKU-1003": {"WH-EAST": 30, "WH-WEST": 160},
+    }
+    plan = allocator.plan_rebalance(
+        registry,
+        stock_matrix=custom_matrix,
+        target_cover_days=10.0,
+        transfer_cost_per_unit=1.85,
+        min_transfer_qty=5,
+    )
+    assert plan.total_transfers >= 2
+    assert plan.total_units_rebalanced > 0
+    assert plan.total_net_benefit > 0
+    assert all(
+        t.from_warehouse == "WH-WEST" and t.to_warehouse == "WH-EAST"
+        for t in plan.transfers
+    )
+    assert len(plan.warehouse_summary) == 2
+    assert len(plan.matrix) == 6  # 3 SKUs x 2 warehouses
+
+
+def test_eoq_and_rebalance_fastapi_endpoints(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path / "opt_data")
+    client = TestClient(app)
+
+    eoq_resp = client.post(
+        "/api/v1/supply/eoq-optimize",
+        json={
+            "ordering_cost": 100.0,
+            "holding_cost_rate": 0.25,
+            "service_level": 0.95,
+            "promo_lift_pct": 0.2,
+        },
+    )
+    assert eoq_resp.status_code == 200
+    eoq_data = eoq_resp.json()
+    assert eoq_data["total_skus"] == 3
+    assert eoq_data["total_relevant_cost"] > 0
+    assert len(eoq_data["items"][0]["tradeoff_curve"]) == 6
+
+    bad_eoq = client.post(
+        "/api/v1/supply/eoq-optimize",
+        json={"sku_id": "SKU-NONEXISTENT"},
+    )
+    assert bad_eoq.status_code == 404
+
+    reb_resp = client.post(
+        "/api/v1/supply/rebalance",
+        json={"target_cover_days": 10.0, "transfer_cost_per_unit": 1.85},
+    )
+    assert reb_resp.status_code == 200
+    reb_data = reb_resp.json()
+    assert reb_data["total_transfers"] >= 1
+    assert reb_data["total_units_rebalanced"] > 0
+    assert len(reb_data["warehouse_summary"]) == 2
+    assert len(reb_data["matrix"]) == 6
+
+

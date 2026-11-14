@@ -197,6 +197,19 @@ export const apiClient = {
       body: JSON.stringify(payload),
     }),
 
+  generateFhirBundle: (payload: {
+    patient_case: PatientCaseInput;
+    proposed_med_ids: string[];
+    raw_notes: string;
+  }) =>
+    request<FHIRBundleResponse>("/api/v1/clinical/fhir-bundle", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getTriageQueue: () =>
+    request<TriageQueueResponse>("/api/v1/clinical/triage-queue"),
+
   generateDischargeSummary: (payload: {
     case_id: string;
     raw_notes: string;

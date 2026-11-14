@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
+import TelemetryGrid from "./components/TelemetryGrid.vue";
+import WorkOrderBoard from "./components/WorkOrderBoard.vue";
 import {
   apiClient,
   type AuditLogEntry,
@@ -8,18 +10,25 @@ import {
   type IncidentResponse,
   type OpsActionItem,
   type PredictiveMaintenanceResponse,
+  type TelemetryMetricStats,
   type WikiLintReport,
   type WikiPageItem,
+  type WorkOrderItem,
+  type WorkOrderStatus,
 } from "./api/client";
 
-type TabKey = "telemetry" | "ontology" | "wiki" | "hitl";
+type TabKey = "telemetry" | "workorders" | "ontology" | "wiki" | "hitl";
 
 const activeTab = ref<TabKey>("telemetry");
 const loading = ref(false);
+const streamingTelemetry = ref(false);
+const workOrderBusy = ref(false);
 const errorMsg = ref("");
 const toastMsg = ref("");
 
 const overview = ref<DashboardOverview | null>(null);
+const telemetrySnapshots = ref<Record<string, Record<string, TelemetryMetricStats>>>({});
+const workOrders = ref<WorkOrderItem[]>([]);
 const wikiPages = ref<WikiPageItem[]>([]);
 const selectedWikiPage = ref<WikiPageItem | null>(null);
 const wikiSearch = ref("");
@@ -87,6 +96,8 @@ async function refreshAll() {
       apiClient.getAuditLogs(),
     ]);
     overview.value = ov;
+    workOrders.value = ov.work_orders ?? [];
+    telemetrySnapshots.value = ov.telemetry_snapshots ?? {};
     wikiPages.value = wp.pages;
     if (!selectedWikiPage.value && wp.pages.length > 0) {
       selectedWikiPage.value = wp.pages[0];
@@ -97,6 +108,106 @@ async function refreshAll() {
     errorMsg.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
+  }
+}
+
+async function streamNominalBatch() {
+  streamingTelemetry.value = true;
+  errorMsg.value = "";
+  try {
+    const samples: Array<{ equipment_id: string; readings: Record<string, number> }> = [];
+    for (let i = 0; i < 6; i++) {
+      samples.push({
+        equipment_id: "CNC-LINE1-01",
+        readings: {
+          temperature_c: 62.0 + (i % 3) * 0.4,
+          vibration_mms: 2.0 + (i % 2) * 0.12,
+        },
+      });
+      samples.push({
+        equipment_id: "MOLD-LINE2-01",
+        readings: {
+          pressure_bar: 142.0 + (i % 3) * 1.1,
+          temperature_c: 54.0 + (i % 2) * 0.5,
+        },
+      });
+    }
+    const res = await apiClient.ingestTelemetryBatch(samples);
+    telemetrySnapshots.value = res.equipment_snapshots;
+    showToast(`已写入 ${res.ingested_count} 条稳态遥测至 RingBuffer (异常: ${res.anomaly_count})`);
+    await refreshAll();
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    streamingTelemetry.value = false;
+  }
+}
+
+async function injectAnomalySpike() {
+  streamingTelemetry.value = true;
+  errorMsg.value = "";
+  try {
+    const readings: Record<string, number> =
+      selectedEquipmentId.value === "MOLD-LINE2-01"
+        ? { pressure_bar: 222.0, temperature_c: 84.5 }
+        : { temperature_c: 94.5, vibration_mms: 8.1 };
+    const res = await apiClient.ingestTelemetryBatch([
+      { equipment_id: selectedEquipmentId.value, readings },
+    ]);
+    telemetrySnapshots.value = res.equipment_snapshots;
+    showToast(
+      res.anomaly_count > 0
+        ? `Z-Score 异常脉冲检出 (${selectedEquipmentId.value}): ${res.anomaly_count} 项指标越界！`
+        : `已注入脉冲至 ${selectedEquipmentId.value} (需先采集 >=5 条基线样本)`
+    );
+    await refreshAll();
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    streamingTelemetry.value = false;
+  }
+}
+
+async function handleWorkOrderTransition(payload: {
+  work_order_id: string;
+  target_status: WorkOrderStatus;
+  actor: string;
+  assigned_to?: string;
+  loto_tag_id?: string;
+  notes?: string;
+}) {
+  workOrderBusy.value = true;
+  errorMsg.value = "";
+  try {
+    const res = await apiClient.transitionWorkOrder(payload);
+    showToast(`工单 ${res.work_order.work_order_id} 已流转至 ${res.work_order.status}`);
+    await refreshAll();
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    workOrderBusy.value = false;
+  }
+}
+
+async function handleWorkOrderCreate(payload: {
+  equipment_id: string;
+  title: string;
+  fault_code?: string;
+  sop_id?: string;
+  priority: string;
+  actor: string;
+  notes?: string;
+}) {
+  workOrderBusy.value = true;
+  errorMsg.value = "";
+  try {
+    const res = await apiClient.createWorkOrder(payload);
+    showToast(`已创建 LOTO 工单 ${res.work_order.work_order_id}`);
+    await refreshAll();
+  } catch (err) {
+    errorMsg.value = err instanceof Error ? err.message : String(err);
+  } finally {
+    workOrderBusy.value = false;
   }
 }
 
@@ -243,8 +354,11 @@ onMounted(() => {
   <div class="shell">
     <header class="topbar">
       <div>
-        <div class="eyebrow">PROJECT P04 · ENTERPRISE MANUFACTURING OPS</div>
-        <h1>智能制造设备运维与本体决策工作台</h1>
+        <div class="eyebrow">
+          <span class="scada-live-dot"></span>
+          SCADA PLANT CONTROL ROOM · P04 IIOT DIGITAL TWIN CONSOLE
+        </div>
+        <h1>工业 SCADA 数字孪生遥测与 LOTO 运维控制台</h1>
       </div>
       <div class="topbar-actions">
         <span v-if="toastMsg" class="toast">{{ toastMsg }}</span>
@@ -261,6 +375,10 @@ onMounted(() => {
       <div class="kpi-card">
         <div class="kpi-label">接入设备数</div>
         <div class="kpi-val">{{ overview.equipment_count }}</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">LOTO 维保工单</div>
+        <div class="kpi-val kpi-amber">{{ workOrders.length }}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">本体故障码</div>
@@ -284,14 +402,22 @@ onMounted(() => {
       </div>
     </section>
 
-    <!-- 4-Tab Workbench Navigation -->
+    <!-- 5-Tab SCADA Control Room Navigation -->
     <nav class="tabs">
       <button
         class="tab-btn"
         :class="{ active: activeTab === 'telemetry' }"
         @click="activeTab = 'telemetry'"
       >
-        设备遥测诊断与预测维保
+        数字孪生遥测矩阵与诊断
+      </button>
+      <button
+        class="tab-btn"
+        :class="{ active: activeTab === 'workorders' }"
+        @click="activeTab = 'workorders'"
+      >
+        LOTO 维保工单看板
+        <span v-if="workOrders.length > 0" class="tab-pill tab-pill-amber">{{ workOrders.length }}</span>
       </button>
       <button
         class="tab-btn"
@@ -317,8 +443,18 @@ onMounted(() => {
       </button>
     </nav>
 
-    <!-- Tab 1: Telemetry Diagnosis & Predictive Maintenance -->
-    <main v-if="activeTab === 'telemetry'" class="panel-grid">
+    <!-- Tab 1: Digital Twin Telemetry Matrix & Diagnosis -->
+    <template v-if="activeTab === 'telemetry'">
+      <TelemetryGrid
+        :equipment="overview?.equipment ?? []"
+        :selected-equipment-id="selectedEquipmentId"
+        :snapshots="telemetrySnapshots"
+        :streaming="streamingTelemetry"
+        @select="(id) => (selectedEquipmentId = id)"
+        @stream-nominal="streamNominalBatch"
+        @inject-spike="injectAnomalySpike"
+      />
+      <main class="panel-grid">
       <section class="card">
         <h2>实时遥测注入与本体诊断</h2>
         <div class="form-grid">
@@ -456,9 +592,21 @@ onMounted(() => {
           </div>
         </div>
       </section>
+      </main>
+    </template>
+
+    <!-- Tab 2: LOTO Maintenance Work-Order Kanban -->
+    <main v-else-if="activeTab === 'workorders'">
+      <WorkOrderBoard
+        :work-orders="workOrders"
+        :equipment="overview?.equipment ?? []"
+        :busy="workOrderBusy"
+        @transition="handleWorkOrderTransition"
+        @create="handleWorkOrderCreate"
+      />
     </main>
 
-    <!-- Tab 2: Fault-SOP Ontology Graph -->
+    <!-- Tab 3: Fault-SOP Ontology Graph -->
     <main v-else-if="activeTab === 'ontology'" class="panel-grid">
       <section class="card">
         <h2>故障码本体库 (FaultCodes)</h2>
@@ -673,13 +821,13 @@ onMounted(() => {
 <style scoped>
 :global(body) {
   margin: 0;
-  background: #0b1120;
-  color: #e2e8f0;
+  background: #111827;
+  color: #f3f4f6;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 }
 
 .shell {
-  max-width: 1380px;
+  max-width: 1420px;
   margin: 0 auto;
   padding: 1.25rem 1.5rem 3rem;
 }
@@ -689,34 +837,47 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 2px solid #1f2937;
   padding-bottom: 1rem;
   margin-bottom: 1.25rem;
 }
 
 .eyebrow {
-  font-size: 0.72rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.74rem;
   letter-spacing: 0.12em;
-  color: #38bdf8;
+  color: #06b6d4;
   font-weight: 700;
+}
+
+.scada-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #06b6d4;
+  box-shadow: 0 0 10px #06b6d4, 0 0 4px #22d3ee;
 }
 
 h1 {
   margin: 0.25rem 0 0;
   font-size: 1.45rem;
   font-weight: 700;
+  color: #f9fafb;
 }
 
 h2 {
   margin: 0 0 0.85rem;
   font-size: 1.05rem;
-  color: #f8fafc;
+  color: #f9fafb;
 }
 
 h3 {
   margin: 0 0 0.6rem;
   font-size: 0.92rem;
-  color: #cbd5e1;
+  color: #d1d5db;
 }
 
 .topbar-actions {
@@ -726,15 +887,18 @@ h3 {
 }
 
 .toast {
-  background: #065f46;
-  color: #d1fae5;
+  background: rgba(6, 182, 212, 0.16);
+  border: 1px solid #06b6d4;
+  color: #cffafe;
   padding: 0.4rem 0.75rem;
   border-radius: 6px;
   font-size: 0.82rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 .error-banner {
   background: #7f1d1d;
+  border: 1px solid #ef4444;
   color: #fecaca;
   padding: 0.65rem 1rem;
   border-radius: 8px;
@@ -744,33 +908,43 @@ h3 {
 
 .kpi-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
   gap: 0.75rem;
   margin-bottom: 1.25rem;
 }
 
 .kpi-card {
-  background: #111827;
-  border: 1px solid #1e293b;
-  border-radius: 10px;
+  background: #0b1120;
+  border: 1px solid #1f2937;
+  border-left: 3px solid #06b6d4;
+  border-radius: 8px;
   padding: 0.85rem 1rem;
 }
 
 .kpi-alert {
   border-color: #f59e0b;
-  background: #1c1917;
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.08);
 }
 
 .kpi-label {
-  font-size: 0.76rem;
-  color: #94a3b8;
+  font-size: 0.74rem;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .kpi-val {
   font-size: 1.5rem;
   font-weight: 700;
   margin-top: 0.25rem;
+  color: #22d3ee;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-variant-numeric: tabular-nums;
+}
+
+.kpi-amber {
+  color: #f59e0b;
 }
 
 .tabs {
@@ -781,13 +955,13 @@ h3 {
 }
 
 .tab-btn {
-  background: #111827;
-  color: #94a3b8;
-  border: 1px solid #1e293b;
+  background: #0b1120;
+  color: #9ca3af;
+  border: 1px solid #374151;
   border-radius: 8px;
   padding: 0.55rem 1rem;
   cursor: pointer;
-  font-size: 0.88rem;
+  font-size: 0.86rem;
   font-weight: 600;
   display: inline-flex;
   align-items: center;
@@ -795,17 +969,24 @@ h3 {
 }
 
 .tab-btn.active {
-  background: #0284c7;
-  color: #ffffff;
-  border-color: #38bdf8;
+  background: rgba(6, 182, 212, 0.16);
+  color: #22d3ee;
+  border-color: #06b6d4;
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.18);
 }
 
 .tab-pill {
-  background: #dc2626;
+  background: #ef4444;
   color: #fff;
   border-radius: 999px;
   padding: 0.1rem 0.45rem;
   font-size: 0.72rem;
+}
+
+.tab-pill-amber {
+  background: #f59e0b;
+  color: #111827;
+  font-weight: 700;
 }
 
 .panel-grid {
@@ -815,9 +996,9 @@ h3 {
 }
 
 .card {
-  background: #111827;
-  border: 1px solid #1e293b;
-  border-radius: 12px;
+  background: #0b1120;
+  border: 1px solid #1f2937;
+  border-radius: 10px;
   padding: 1.15rem;
 }
 

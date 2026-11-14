@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .fde_pipeline import DevSecOpsFDEPipeline
 from .llm_wiki import DevSecOpsLLMWiki
 from .ontology import DevSecOpsOntologyRegistry
+from .sbom_scanner import PostmortemExporter, SBOMScanner, build_default_cyclonedx_sbom
 
 
 class WikiIngestRequest(BaseModel):
@@ -50,6 +51,26 @@ class CveGateRequest(BaseModel):
     dependency_cvss_overrides: dict[str, float] = Field(default_factory=dict)
 
 
+class SbomScanRequest(BaseModel):
+    service_id: Optional[str] = Field(default=None, examples=["svc-auth"])
+    sbom: Optional[dict[str, Any]] = None
+    block_threshold: float = Field(default=9.0, ge=0.0, le=10.0)
+
+
+class PostmortemExportRequest(BaseModel):
+    incident_id: str = Field(default="INC-2026-042")
+    title: str = Field(..., examples=["Auth Token Validation Latency Spike"])
+    service_id: str = Field(..., examples=["svc-auth"])
+    severity: str = Field(default="SEV-1")
+    commander: str = Field(default="sre-lead-alice")
+    summary: str = Field(..., examples=["Redis connection pool exhaustion caused 5xx."])
+    root_cause: str = Field(..., examples=["Unbounded retry loop under auth-jwt-lib 4.2.0."])
+    timeline: list[dict[str, str]] = Field(default_factory=list)
+    action_items: list[dict[str, str]] = Field(default_factory=list)
+    include_blast_radius: bool = Field(default=True)
+    sbom: Optional[dict[str, Any]] = None
+
+
 def create_app(
     wiki_dir: Optional[str | Path] = None,
     seed_demo: bool = True,
@@ -68,6 +89,8 @@ def create_app(
         wiki.sync_from_ontology(registry)
 
     pipeline = DevSecOpsFDEPipeline(registry=registry, wiki=wiki)
+    sbom_scanner = SBOMScanner()
+    postmortem_exporter = PostmortemExporter()
 
     metrics_state: dict[str, Any] = {
         "requests_total": 0,
@@ -76,6 +99,8 @@ def create_app(
         "triage_total": 0,
         "approvals_total": 0,
         "cve_gates_total": 0,
+        "sbom_scans_total": 0,
+        "postmortems_exported_total": 0,
         "last_latency_ms": 0.0,
     }
 
@@ -93,6 +118,8 @@ def create_app(
     app.state.registry = registry
     app.state.wiki = wiki
     app.state.pipeline = pipeline
+    app.state.sbom_scanner = sbom_scanner
+    app.state.postmortem_exporter = postmortem_exporter
     app.state.metrics = metrics_state
 
     @app.middleware("http")
@@ -230,6 +257,47 @@ def create_app(
             return result
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/v1/security/sbom-scan")
+    def security_sbom_scan(payload: SbomScanRequest) -> dict[str, Any]:
+        if payload.sbom is not None:
+            sbom_payload = payload.sbom
+        elif payload.service_id:
+            if payload.service_id not in registry.services:
+                raise HTTPException(status_code=404, detail=f"Unknown service_id: {payload.service_id}")
+            sbom_payload = build_default_cyclonedx_sbom(payload.service_id)
+        else:
+            raise HTTPException(status_code=422, detail="Either 'sbom' or 'service_id' must be provided.")
+
+        result = sbom_scanner.scan(sbom_payload, block_threshold=payload.block_threshold)
+        metrics_state["sbom_scans_total"] += 1
+        return result
+
+    @app.post("/api/v1/incidents/postmortem")
+    def incidents_postmortem(payload: PostmortemExportRequest) -> dict[str, Any]:
+        if payload.include_blast_radius and payload.service_id not in registry.services:
+            raise HTTPException(status_code=404, detail=f"Unknown service_id: {payload.service_id}")
+
+        sbom_result = (
+            sbom_scanner.scan(payload.sbom)
+            if payload.sbom is not None
+            else sbom_scanner.scan(build_default_cyclonedx_sbom(payload.service_id))
+        )
+        result = postmortem_exporter.export(
+            incident_id=payload.incident_id,
+            title=payload.title,
+            service_id=payload.service_id,
+            severity=payload.severity,
+            commander=payload.commander,
+            summary=payload.summary,
+            root_cause=payload.root_cause,
+            timeline=payload.timeline,
+            action_items=payload.action_items,
+            registry=registry if payload.include_blast_radius else None,
+            sbom_scan=sbom_result,
+        )
+        metrics_state["postmortems_exported_total"] += 1
+        return result
 
     return app
 

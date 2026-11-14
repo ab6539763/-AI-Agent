@@ -181,6 +181,78 @@ export interface AuditLogsResponse {
   total: number;
 }
 
+export interface CreditScorePayload {
+  issuer_id: string;
+  period?: string;
+  total_debt: number;
+  shareholders_equity: number;
+  current_assets: number;
+  current_liabilities: number;
+  ebit: number;
+  interest_expense: number;
+  net_income: number;
+  wacc?: number;
+  terminal_growth?: number;
+}
+
+export interface CreditScoreResponse {
+  issuer_id: string;
+  period: string;
+  credit_rating: string;
+  composite_score: number;
+  implied_spread_bps: number;
+  probability_of_default_1y_pct: number;
+  altman_z_score: {
+    score: number;
+    zone: "SAFE" | "GREY" | "DISTRESS";
+    components: Record<string, number>;
+  };
+  piotroski_f_score: {
+    score: number;
+    max_score: number;
+    criteria: Record<string, boolean>;
+  };
+  sub_scores: {
+    leverage_score: number;
+    liquidity_score: number;
+  };
+  ratios: Record<string, number>;
+  dcf_valuation: {
+    fcf_base: number;
+    projected_5y_growth: number;
+    wacc: number;
+    terminal_growth: number;
+    enterprise_value: number;
+    implied_equity_value: number;
+    sensitivity_matrix: Array<{
+      wacc: string;
+      equity_values_by_terminal_growth: Record<string, number>;
+    }>;
+  };
+  audit_event_id?: string;
+}
+
+export interface ResearchStreamParams {
+  issuer_id?: string;
+  question: string;
+  period?: string;
+  total_debt?: number;
+  shareholders_equity?: number;
+  current_assets?: number;
+  current_liabilities?: number;
+  ebit?: number;
+  interest_expense?: number;
+  net_income?: number;
+}
+
+export interface ResearchStreamHandlers {
+  onStage?: (data: Record<string, unknown>) => void;
+  onToken?: (data: { index: number; text: string }) => void;
+  onBlocked?: (data: Record<string, unknown>) => void;
+  onDone?: (data: Record<string, unknown>) => void;
+  onError?: (err: string) => void;
+}
+
 const API_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) || "";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -231,6 +303,72 @@ export const p01Api = {
       method: "POST",
       body: JSON.stringify({ items, actor_role: actorRole }),
     }),
+  scoreCredit: (payload: CreditScorePayload) =>
+    requestJson<CreditScoreResponse>("/api/v1/quant/credit-score", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  streamResearchMemo: (
+    params: ResearchStreamParams,
+    handlers: ResearchStreamHandlers
+  ): (() => void) => {
+    const qs = new URLSearchParams();
+    if (params.issuer_id) qs.set("issuer_id", params.issuer_id);
+    qs.set("question", params.question);
+    if (params.period) qs.set("period", params.period);
+    if (params.total_debt !== undefined) qs.set("total_debt", String(params.total_debt));
+    if (params.shareholders_equity !== undefined) {
+      qs.set("shareholders_equity", String(params.shareholders_equity));
+    }
+    if (params.current_assets !== undefined) {
+      qs.set("current_assets", String(params.current_assets));
+    }
+    if (params.current_liabilities !== undefined) {
+      qs.set("current_liabilities", String(params.current_liabilities));
+    }
+    if (params.ebit !== undefined) qs.set("ebit", String(params.ebit));
+    if (params.interest_expense !== undefined) {
+      qs.set("interest_expense", String(params.interest_expense));
+    }
+    if (params.net_income !== undefined) qs.set("net_income", String(params.net_income));
+
+    const es = new EventSource(`${API_BASE}/api/v1/research/stream?${qs.toString()}`);
+
+    es.addEventListener("stage", (ev) => {
+      try {
+        handlers.onStage?.(JSON.parse((ev as MessageEvent).data));
+      } catch {
+        // ignore malformed stage payload
+      }
+    });
+    es.addEventListener("token", (ev) => {
+      try {
+        handlers.onToken?.(JSON.parse((ev as MessageEvent).data));
+      } catch {
+        // ignore malformed token payload
+      }
+    });
+    es.addEventListener("blocked", (ev) => {
+      try {
+        handlers.onBlocked?.(JSON.parse((ev as MessageEvent).data));
+      } finally {
+        es.close();
+      }
+    });
+    es.addEventListener("done", (ev) => {
+      try {
+        handlers.onDone?.(JSON.parse((ev as MessageEvent).data));
+      } finally {
+        es.close();
+      }
+    });
+    es.onerror = () => {
+      handlers.onError?.("SSE stream connection closed");
+      es.close();
+    };
+
+    return () => es.close();
+  },
   getPendingActions: () =>
     requestJson<PendingActionsResponse>("/api/v1/actions/pending"),
   approveAction: (payload: ActionApprovePayload) =>

@@ -160,6 +160,50 @@ export interface WikiLintResponse {
   }>;
 }
 
+export interface TimelineObligationItem {
+  id: string;
+  clause_title: string;
+  category: "sla" | "notice" | "renewal" | "breach_notification" | "payment" | "audit" | "general";
+  party: "vendor" | "customer" | "mutual";
+  due_days: number | null;
+  due_hours: number | null;
+  due_date_iso: string | null;
+  deadline_label: string;
+  recurring: boolean;
+  severity: "low" | "medium" | "high" | "critical";
+  summary: string;
+  source_excerpt: string;
+}
+
+export interface ObligationTimelineResponse {
+  contract_id: string;
+  title: string;
+  effective_date: string;
+  total_obligations: number;
+  summary_counts: Record<string, number>;
+  obligations: TimelineObligationItem[];
+  pii_masked_count: number;
+  audit_entry: AuditLogEntry;
+}
+
+export interface PlaybookClauseEntry {
+  id: string;
+  clause_type: string;
+  title: string;
+  risk_trigger: string;
+  standard_position: string;
+  fallback_position: string;
+  walk_away_trigger: string;
+  rationale: string;
+  keywords: string[];
+}
+
+export interface PlaybookResponse {
+  count: number;
+  clause_types: string[];
+  entries: PlaybookClauseEntry[];
+}
+
 const BASE = "";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -201,6 +245,21 @@ export const legalApi = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
+  extractObligations: (payload: {
+    contract_id: string;
+    title: string;
+    text: string;
+    effective_date?: string;
+    requested_by?: string;
+  }) =>
+    requestJson<ObligationTimelineResponse>("/api/v1/contracts/obligations", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getPlaybook: (clauseType?: string) => {
+    const qs = clauseType ? `?clause_type=${encodeURIComponent(clauseType)}` : "";
+    return requestJson<PlaybookResponse>(`/api/v1/contracts/playbook${qs}`);
+  },
   listClauses: (riskLevel?: string) => {
     const qs = riskLevel ? `?risk_level=${encodeURIComponent(riskLevel)}` : "";
     return requestJson<{ count: number; clauses: ClauseItem[] }>(`/api/v1/ontology/clauses${qs}`);

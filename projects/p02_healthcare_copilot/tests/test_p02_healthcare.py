@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.api import create_app  # noqa: E402
 from app.fde_pipeline import HealthcareFDEPipeline  # noqa: E402
+from app.fhir_adapter import ESITriageQueue, FHIRAdapter  # noqa: E402
 from app.llm_wiki import ClinicalLLMWiki  # noqa: E402
 from app.ontology import (  # noqa: E402
     ClinicalOntologyRegistry,
@@ -503,4 +504,163 @@ def test_enterprise_discharge_summary_endpoint(tmp_path: Path) -> None:
     audit_data = client.get("/api/v1/audit/logs").json()
     assert audit_data["total"] == 1
     assert audit_data["logs"][0]["event_type"] == "DISCHARGE_SUMMARY"
+
+
+def test_fhir_adapter_bundle_and_soap_formatter() -> None:
+    registry = ClinicalOntologyRegistry(seed_defaults=True)
+    adapter = FHIRAdapter(registry=registry)
+
+    case = PatientCase(
+        case_id="case-fhir-01",
+        patient_ref="ED-BAY-09",
+        age=68,
+        sex="M",
+        chief_complaint="Patient: John Smith (MRN-112233) with substernal chest pain",
+        symptoms=[
+            Symptom(
+                symptom_id="chest_pain",
+                name="Chest Pain",
+                severity="critical",
+                is_red_flag=True,
+            )
+        ],
+        active_medications=["warfarin"],
+        allergies=[],
+        conditions=["hypertension"],
+        vital_signs={"spo2": 87.0, "hr": 122.0, "sbp": 95.0},
+    )
+
+    interaction_res = registry.evaluate_action_constraints(case, ["ibuprofen"])
+    bundle = adapter.to_fhir_bundle(
+        case=case,
+        proposed_med_ids=["ibuprofen"],
+        interaction_result=interaction_res,
+    )
+    assert bundle["resourceType"] == "Bundle"
+    assert bundle["type"] == "collection"
+    resource_types = {entry["resource"]["resourceType"] for entry in bundle["entry"]}
+    assert resource_types == {"Patient", "Condition", "MedicationRequest", "Observation"}
+
+    # Ensure PHI was masked inside Condition text
+    serialized = json.dumps(bundle)
+    assert "John Smith" not in serialized
+    assert "MRN-112233" not in serialized
+
+    # Verify stopped status on blocked MedicationRequest
+    med_reqs = [
+        entry["resource"]
+        for entry in bundle["entry"]
+        if entry["resource"]["resourceType"] == "MedicationRequest"
+    ]
+    assert any(mr["status"] == "stopped" for mr in med_reqs)
+
+    soap = adapter.format_soap_note(
+        case=case,
+        proposed_med_ids=["ibuprofen"],
+        raw_notes="SSN 123-45-6789",
+        interaction_result=interaction_res,
+    )
+    assert soap.esi_level == 1
+    assert "John Smith" not in soap.subjective
+    assert "123-45-6789" not in soap.subjective
+    assert "SPO2=87.0" in soap.objective
+    assert "HOLD proposed order" in soap.plan
+    assert "S (Subjective):" in soap.formatted_text
+
+
+def test_esi_triage_queue_priority_sorting() -> None:
+    registry = ClinicalOntologyRegistry(seed_defaults=True)
+    queue = ESITriageQueue(seed_defaults=False)
+
+    routine_case = PatientCase(
+        case_id="case-esi-5",
+        age=28,
+        sex="F",
+        chief_complaint="Mild sore throat",
+        symptoms=[Symptom(symptom_id="sore_throat", name="Sore Throat", severity="mild")],
+        vital_signs={"spo2": 99.0, "hr": 74.0, "sbp": 116.0},
+    )
+    urgent_case = PatientCase(
+        case_id="case-esi-3",
+        age=50,
+        sex="M",
+        chief_complaint="Severe flank pain",
+        symptoms=[Symptom(symptom_id="flank_pain", name="Flank Pain", severity="severe")],
+        vital_signs={"spo2": 97.0, "hr": 96.0, "sbp": 130.0},
+    )
+    resus_case = PatientCase(
+        case_id="case-esi-1",
+        age=72,
+        sex="M",
+        chief_complaint="Acute hypoxia and unresponsiveness",
+        symptoms=[Symptom(symptom_id="dyspnea", name="Dyspnea", severity="critical", is_red_flag=True)],
+        vital_signs={"spo2": 82.0, "hr": 135.0, "sbp": 84.0},
+    )
+
+    # Enqueue out of priority order: ESI-5 -> ESI-3 -> ESI-1
+    queue.enqueue_case(routine_case, registry=registry)
+    queue.enqueue_case(urgent_case, registry=registry)
+    queue.enqueue_case(resus_case, registry=registry)
+
+    sorted_entries = queue.list_queue()
+    assert [e.case_id for e in sorted_entries] == ["case-esi-1", "case-esi-3", "case-esi-5"]
+    assert [e.esi_level for e in sorted_entries] == [1, 3, 5]
+
+
+def test_fastapi_fhir_bundle_and_triage_queue_endpoints(tmp_path: Path) -> None:
+    test_app = create_app(
+        wiki_dir=tmp_path / "fhir_wiki",
+        audit_log_path=tmp_path / "fhir_audit.jsonl",
+    )
+    client = TestClient(test_app)
+
+    # 1. GET /api/v1/clinical/triage-queue returns seeded encounters sorted by ESI ascending
+    q_resp = client.get("/api/v1/clinical/triage-queue")
+    assert q_resp.status_code == 200
+    q_data = q_resp.json()
+    assert q_data["total"] >= 4
+    levels = [item["esi_level"] for item in q_data["queue"]]
+    assert levels == sorted(levels)
+
+    # 2. POST /api/v1/clinical/fhir-bundle generates HL7 FHIR Bundle + SOAP note + enqueues patient
+    fb_resp = client.post(
+        "/api/v1/clinical/fhir-bundle",
+        json={
+            "patient_case": {
+                "case_id": "case-api-fhir-77",
+                "patient_ref": "ED-BAY-07",
+                "age": 61,
+                "sex": "F",
+                "chief_complaint": "Patient: Mary Jane, MRN-556677, acute anaphylaxis",
+                "symptoms": [
+                    {
+                        "symptom_id": "anaphylaxis",
+                        "name": "Anaphylaxis",
+                        "severity": "critical",
+                        "is_red_flag": True,
+                    }
+                ],
+                "active_medications": [],
+                "allergies": ["penicillin"],
+                "conditions": ["asthma"],
+                "vital_signs": {"spo2": 86.0, "hr": 134.0, "sbp": 88.0},
+            },
+            "proposed_med_ids": ["amoxicillin"],
+            "raw_notes": "Phone 555-444-3333",
+        },
+    )
+    assert fb_resp.status_code == 200
+    fb_data = fb_resp.json()
+    assert fb_data["case_id"] == "case-api-fhir-77"
+    assert fb_data["esi_triage"]["esi_level"] == 1
+    assert fb_data["interaction_check"]["blocked"] is True
+    assert fb_data["bundle"]["resourceType"] == "Bundle"
+    assert "Mary Jane" not in json.dumps(fb_data["bundle"])
+    assert "555-444-3333" not in fb_data["soap_note"]["subjective"]
+
+    # Confirm newly added ESI-1 patient appears in triage queue
+    q_after = client.get("/api/v1/clinical/triage-queue").json()
+    case_ids = [item["case_id"] for item in q_after["queue"]]
+    assert "case-api-fhir-77" in case_ids
+
 

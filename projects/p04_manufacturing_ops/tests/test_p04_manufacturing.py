@@ -21,6 +21,11 @@ from app.ontology import (
     ManufacturingOntologyRegistry,
     Severity,
 )
+from app.telemetry_stream import (
+    TelemetryRingBuffer,
+    WorkOrderStateMachine,
+    WorkOrderStatus,
+)
 
 
 def test_ontology_telemetry_diagnosis_and_fault_to_sop_resolution() -> None:
@@ -418,4 +423,141 @@ def test_predictive_maintenance_batch_and_error_handling(tmp_path: Path) -> None
         json={"samples": [{"equipment_id": "NO-SUCH-EQ", "readings": {}}]},
     )
     assert r_unknown.status_code == 404
+
+
+def test_telemetry_ring_buffer_zscore_anomaly_detection() -> None:
+    ring = TelemetryRingBuffer(window_size=10, z_threshold=2.5, min_samples=5)
+
+    # Seed 6 nominal baseline samples for CNC-LINE1-01
+    baseline_samples = [
+        {"equipment_id": "CNC-LINE1-01", "readings": {"temperature_c": 62.0, "vibration_mms": 2.0}},
+        {"equipment_id": "CNC-LINE1-01", "readings": {"temperature_c": 62.5, "vibration_mms": 2.1}},
+        {"equipment_id": "CNC-LINE1-01", "readings": {"temperature_c": 61.8, "vibration_mms": 1.9}},
+        {"equipment_id": "CNC-LINE1-01", "readings": {"temperature_c": 62.2, "vibration_mms": 2.0}},
+        {"equipment_id": "CNC-LINE1-01", "readings": {"temperature_c": 62.1, "vibration_mms": 2.05}},
+        {"equipment_id": "CNC-LINE1-01", "readings": {"temperature_c": 62.3, "vibration_mms": 1.95}},
+    ]
+    baseline_res = ring.ingest_batch(baseline_samples)
+    assert baseline_res["ingested_count"] == 6
+    assert baseline_res["anomaly_count"] == 0
+
+    # Inject sudden spindle overheat + vibration spike
+    spike_res = ring.ingest_batch(
+        [
+            {
+                "equipment_id": "CNC-LINE1-01",
+                "readings": {"temperature_c": 88.5, "vibration_mms": 6.8},
+            }
+        ]
+    )
+    assert spike_res["anomaly_count"] == 2
+    anomalous_metrics = {a["metric"] for a in spike_res["anomalies"]}
+    assert anomalous_metrics == {"temperature_c", "vibration_mms"}
+    for anomaly in spike_res["anomalies"]:
+        assert anomaly["z_score"] >= 2.5
+
+    # Constant hydraulic pressure baseline should also detect sudden surge
+    for _ in range(5):
+        ring.ingest_sample("MOLD-LINE2-01", {"pressure_bar": 140.0})
+    surge_res = ring.ingest_sample("MOLD-LINE2-01", {"pressure_bar": 215.0})
+    assert surge_res["anomaly_detected"] is True
+    assert surge_res["anomalies"][0]["metric"] == "pressure_bar"
+
+
+def test_work_order_state_machine_loto_transitions() -> None:
+    import pytest
+
+    sm = WorkOrderStateMachine(seed_defaults=False)
+    wo = sm.create_work_order(
+        equipment_id="CNC-LINE1-01",
+        title="Spindle Bearing Replacement",
+        fault_code="ERR-CNC-401",
+        sop_id="SOP-CNC-001",
+    )
+    assert wo.status == WorkOrderStatus.OPEN
+
+    # Invalid jump OPEN -> LOCKOUT_TAGOUT must fail
+    with pytest.raises(ValueError):
+        sm.transition(wo.work_order_id, WorkOrderStatus.LOCKOUT_TAGOUT, actor="tech-a")
+
+    # Valid LOTO sequence: OPEN -> ASSIGNED -> LOCKOUT_TAGOUT -> VERIFIED -> CLOSED
+    wo = sm.transition(wo.work_order_id, "ASSIGNED", actor="lead-1", assigned_to="tech-wang")
+    assert wo.status == WorkOrderStatus.ASSIGNED
+    assert wo.assigned_to == "tech-wang"
+
+    wo = sm.transition(
+        wo.work_order_id,
+        WorkOrderStatus.LOCKOUT_TAGOUT,
+        actor="tech-wang",
+        loto_tag_id="LOTO-480V-09",
+    )
+    assert wo.status == WorkOrderStatus.LOCKOUT_TAGOUT
+    assert wo.loto_tag_id == "LOTO-480V-09"
+
+    wo = sm.transition(wo.work_order_id, WorkOrderStatus.VERIFIED, actor="safety-officer-1")
+    assert wo.status == WorkOrderStatus.VERIFIED
+    assert wo.verified_by == "safety-officer-1"
+
+    wo = sm.transition(wo.work_order_id, WorkOrderStatus.CLOSED, actor="shift-supervisor")
+    assert wo.status == WorkOrderStatus.CLOSED
+    assert len(wo.history) == 5
+
+    # Unknown work order raises KeyError
+    with pytest.raises(KeyError):
+        sm.transition("WO-DOES-NOT-EXIST", WorkOrderStatus.ASSIGNED)
+
+
+def test_api_telemetry_ingest_batch_and_workorder_transitions(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path / "scada_wiki")
+    client = TestClient(app)
+
+    # 1. Ingest 5 baseline samples then 1 spike via /api/v1/telemetry/ingest-batch
+    samples = [
+        {"equipment_id": "CNC-LINE1-01", "readings": {"temperature_c": 60.0 + i * 0.1, "vibration_mms": 2.0}}
+        for i in range(5)
+    ]
+    samples.append(
+        {"equipment_id": "CNC-LINE1-01", "readings": {"temperature_c": 94.0, "vibration_mms": 7.9}}
+    )
+    r_batch = client.post("/api/v1/telemetry/ingest-batch", json={"samples": samples})
+    assert r_batch.status_code == 200
+    batch_data = r_batch.json()
+    assert batch_data["ingested_count"] == 6
+    assert batch_data["anomaly_count"] == 2
+    assert "CNC-LINE1-01" in batch_data["equipment_snapshots"]
+
+    # Unknown equipment in telemetry batch -> 404
+    r_bad_eq = client.post(
+        "/api/v1/telemetry/ingest-batch",
+        json={"samples": [{"equipment_id": "UNKNOWN-CELL", "readings": {"temperature_c": 50.0}}]},
+    )
+    assert r_bad_eq.status_code == 404
+
+    # 2. Transition seeded work order WO-LOTO-101: OPEN -> ASSIGNED -> LOCKOUT_TAGOUT
+    r_assign = client.post(
+        "/api/v1/workorders/transition",
+        json={
+            "work_order_id": "WO-LOTO-101",
+            "target_status": "ASSIGNED",
+            "actor": "shift-lead",
+            "assigned_to": "tech-zhao",
+        },
+    )
+    assert r_assign.status_code == 200
+    assert r_assign.json()["work_order"]["status"] == "ASSIGNED"
+
+    # Invalid skip ASSIGNED -> CLOSED -> 409 Conflict
+    r_skip = client.post(
+        "/api/v1/workorders/transition",
+        json={"work_order_id": "WO-LOTO-101", "target_status": "CLOSED", "actor": "shift-lead"},
+    )
+    assert r_skip.status_code == 409
+
+    # Unknown work order -> 404
+    r_missing_wo = client.post(
+        "/api/v1/workorders/transition",
+        json={"work_order_id": "WO-MISSING", "target_status": "ASSIGNED", "actor": "shift-lead"},
+    )
+    assert r_missing_wo.status_code == 404
+
 

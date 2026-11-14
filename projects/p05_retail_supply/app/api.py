@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from .fde_pipeline import RetailFDEPipeline
 from .llm_wiki import RetailLLMWiki
 from .ontology import ActionStatus, RetailOntologyRegistry
+from .supply_optimizer import EOQOptimizer, WarehouseAllocator
 
 
 class WikiIngestRequest(BaseModel):
@@ -55,6 +56,24 @@ class MarginSimulateRequest(BaseModel):
     actor: str = "merchandiser-sim"
 
 
+class EOQOptimizeRequest(BaseModel):
+    sku_id: str | None = None
+    ordering_cost: float = Field(default=85.0, gt=0)
+    holding_cost_rate: float = Field(default=0.24, gt=0, le=1.0)
+    service_level: float = Field(default=0.95, ge=0.5, le=0.999)
+    daily_demand_override: float | None = Field(default=None, gt=0)
+    lead_time_override: int | None = Field(default=None, ge=1)
+    promo_lift_pct: float = Field(default=0.0, ge=0.0, le=3.0)
+
+
+class RebalanceRequest(BaseModel):
+    sku_ids: list[str] | None = None
+    stock_matrix: dict[str, dict[str, int]] | None = None
+    target_cover_days: float = Field(default=10.0, gt=0)
+    transfer_cost_per_unit: float = Field(default=1.85, ge=0)
+    min_transfer_qty: int = Field(default=5, ge=1)
+
+
 def create_app(data_dir: Path | str | None = None) -> FastAPI:
     resolved_dir = Path(
         data_dir
@@ -67,6 +86,8 @@ def create_app(data_dir: Path | str | None = None) -> FastAPI:
     wiki = RetailLLMWiki(wiki_dir=wiki_dir)
     pipeline = RetailFDEPipeline(ontology=ontology, wiki=wiki)
     pipeline.seed_wiki_from_ontology()
+    eoq_optimizer = EOQOptimizer()
+    warehouse_allocator = WarehouseAllocator()
 
     app = FastAPI(
         title="P05 Retail & Supply Chain Growth Agent",
@@ -84,6 +105,8 @@ def create_app(data_dir: Path | str | None = None) -> FastAPI:
     app.state.ontology = ontology
     app.state.wiki = wiki
     app.state.pipeline = pipeline
+    app.state.eoq_optimizer = eoq_optimizer
+    app.state.warehouse_allocator = warehouse_allocator
     app.state.metrics = {
         "requests_total": 0,
         "requests_by_path": {},
@@ -305,6 +328,40 @@ def create_app(data_dir: Path | str | None = None) -> FastAPI:
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/v1/supply/eoq-optimize")
+    def supply_eoq_optimize(payload: EOQOptimizeRequest) -> dict[str, Any]:
+        try:
+            res = eoq_optimizer.optimize_registry(
+                ontology,
+                sku_id=payload.sku_id,
+                ordering_cost=payload.ordering_cost,
+                holding_cost_rate=payload.holding_cost_rate,
+                service_level=payload.service_level,
+                daily_demand_override=payload.daily_demand_override,
+                lead_time_override=payload.lead_time_override,
+                promo_lift_pct=payload.promo_lift_pct,
+            )
+            return res.model_dump()
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/v1/supply/rebalance")
+    def supply_rebalance(payload: RebalanceRequest) -> dict[str, Any]:
+        try:
+            res = warehouse_allocator.plan_rebalance(
+                ontology,
+                stock_matrix=payload.stock_matrix,
+                sku_ids=payload.sku_ids,
+                target_cover_days=payload.target_cover_days,
+                transfer_cost_per_unit=payload.transfer_cost_per_unit,
+                min_transfer_qty=payload.min_transfer_qty,
+            )
+            return res.model_dump()
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/v1/actions/approve")
     def actions_approve(payload: ApproveActionRequest) -> dict[str, Any]:

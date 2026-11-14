@@ -5,7 +5,7 @@ status: OPERATIONAL
 entity_id: MOLD-LINE2-01
 entity_type: Equipment
 title: Hydraulic Injection Molder #1
-updated_at: 2026-11-13T12:06:10.200479+00:00
+updated_at: 2026-11-14T01:22:00.946661+00:00
 ---
 
 # Hydraulic Injection Molder #1 (`MOLD-LINE2-01`)

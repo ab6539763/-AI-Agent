@@ -23,6 +23,11 @@ from app.ontology import (
     Runbook,
     Service,
 )
+from app.sbom_scanner import (
+    PostmortemExporter,
+    SBOMScanner,
+    build_default_cyclonedx_sbom,
+)
 
 
 def test_ontology_blast_radius_and_cvss_gate() -> None:
@@ -383,4 +388,115 @@ def test_fastapi_security_cve_gate(tmp_path: Path) -> None:
         json={"service_id": "svc-nonexistent"},
     )
     assert r_404.status_code == 404
+
+
+def test_sbom_scanner_transitive_cves_and_topological_order() -> None:
+    scanner = SBOMScanner()
+    sbom = build_default_cyclonedx_sbom("svc-checkout")
+    result = scanner.scan(sbom, block_threshold=9.0)
+
+    assert result["bom_format"] == "CycloneDX"
+    assert result["root_component"] == "svc-checkout@2.4.0"
+    assert result["total_components"] == 4
+    assert result["gate_decision"] == "BLOCK_DEPLOY"
+    assert result["blocked"] is True
+    assert result["max_cvss"] == 9.4
+    assert result["severity_counts"]["CRITICAL"] == 1
+
+    # Topological order: leaf dependencies appear before root consumer svc-checkout@2.4.0
+    topo = result["topological_blast_order"]
+    assert topo.index("pkg:pypi/auth-jwt-lib@4.2.0") < topo.index("pkg:npm/express-gateway@4.18.2")
+    assert topo.index("pkg:npm/express-gateway@4.18.2") < topo.index("svc-checkout@2.4.0")
+
+    jwt_finding = next(f for f in result["findings"] if f["cve_id"] == "CVE-2026-1042")
+    assert jwt_finding["exposure"] == "transitive"
+    assert jwt_finding["depth"] == 2
+    assert jwt_finding["dependency_path"] == [
+        "svc-checkout@2.4.0",
+        "pkg:npm/express-gateway@4.18.2",
+        "pkg:pypi/auth-jwt-lib@4.2.0",
+    ]
+    assert "svc-checkout@2.4.0" in jwt_finding["impacted_consumers"]
+
+
+def test_postmortem_exporter_blameless_markdown_and_redaction() -> None:
+    registry = DevSecOpsOntologyRegistry()
+    registry.seed_default_topology()
+    exporter = PostmortemExporter()
+
+    sbom_scan = SBOMScanner().scan(build_default_cyclonedx_sbom("svc-auth"))
+    exported = exporter.export(
+        incident_id="INC-2026-042",
+        title="Auth Gateway Token Outage",
+        service_id="svc-auth",
+        severity="SEV-1",
+        commander="sre-lead-alice",
+        summary="502 errors observed with Bearer eyJhbGciOiJIUzI1NiJ9.supersecret123",
+        root_cause="Unpatched auth-jwt-lib 4.2.0 + Redis pool saturation (api_key=sk-test1234567890abcdef)",
+        timeline=[
+            {"timestamp": "2026-11-13T01:10:00Z", "actor": "pagerduty", "event": "SEV-1 triggered"},
+            {"timestamp": "2026-11-13T01:18:00Z", "actor": "sre-lead-alice", "event": "Rollback executed"},
+        ],
+        action_items=[
+            {"priority": "P0", "owner": "sec-core", "task": "Upgrade auth-jwt-lib to 4.2.1", "due_date": "2026-11-15"},
+        ],
+        registry=registry,
+        sbom_scan=sbom_scan,
+    )
+
+    md = exported["markdown"]
+    assert "# Blameless SRE Postmortem: INC-2026-042" in md
+    assert "## Executive Summary" in md
+    assert "## Blameless Root Cause Analysis" in md
+    assert "## Blast Radius & Service Impact" in md
+    assert "## Incident Timeline (UTC)" in md
+    assert "## Action Items & Preventive Controls" in md
+    assert "svc-payment" in md
+    assert "supersecret123" not in md
+    assert "sk-test1234567890abcdef" not in md
+    assert "BEARER_TOKEN" in exported["redactions_applied"]
+
+
+def test_fastapi_sbom_scan_and_postmortem_endpoints(tmp_path: Path) -> None:
+    app = create_app(wiki_dir=tmp_path / "wiki", seed_demo=True)
+    client = TestClient(app)
+
+    r_scan = client.post(
+        "/api/v1/security/sbom-scan",
+        json={"service_id": "svc-auth", "block_threshold": 9.0},
+    )
+    assert r_scan.status_code == 200
+    scan_data = r_scan.json()
+    assert scan_data["gate_decision"] == "BLOCK_DEPLOY"
+    assert scan_data["total_cves"] >= 2
+    assert "pkg:generic/openssl-fips@3.1.0" in scan_data["blast_radius_order"]
+
+    r_scan_422 = client.post("/api/v1/security/sbom-scan", json={})
+    assert r_scan_422.status_code == 422
+
+    r_pm = client.post(
+        "/api/v1/incidents/postmortem",
+        json={
+            "incident_id": "INC-2026-099",
+            "title": "Checkout Latency Spike",
+            "service_id": "svc-checkout",
+            "severity": "SEV-2",
+            "commander": "sre-oncall-bob",
+            "summary": "Timeout spike with ghp_1234567890abcdefghij123456",
+            "root_cause": "Transitive auth-jwt-lib overhead",
+            "timeline": [{"timestamp": "2026-11-13T02:00:00Z", "actor": "sre-oncall-bob", "event": "Mitigated"}],
+            "action_items": [{"priority": "P1", "owner": "commerce-sre", "task": "Pin deps", "due_date": "2026-11-20"}],
+        },
+    )
+    assert r_pm.status_code == 200
+    pm_data = r_pm.json()
+    assert pm_data["incident_id"] == "INC-2026-099"
+    assert "ghp_1234567890abcdefghij123456" not in pm_data["markdown"]
+    assert "GITHUB_TOKEN" in pm_data["redactions_applied"]
+
+    r_metrics = client.get("/metrics")
+    assert r_metrics.status_code == 200
+    assert r_metrics.json()["sbom_scans_total"] == 1
+    assert r_metrics.json()["postmortems_exported_total"] == 1
+
 

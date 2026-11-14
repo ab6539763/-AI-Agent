@@ -147,6 +147,64 @@ export interface AuditLogEntry {
   payload: Record<string, unknown>
 }
 
+export interface SBOMFinding {
+  cve_id: string
+  package_ref: string
+  package_name: string
+  package_version: string
+  cvss_score: number
+  severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+  exposure: 'direct' | 'transitive'
+  depth: number
+  dependency_path: string[]
+  impacted_consumers: string[]
+  fixed_version: string
+  description: string
+}
+
+export interface SBOMScanResponse {
+  bom_format: string
+  spec_version: string
+  root_component: string | null
+  total_components: number
+  vulnerable_components: number
+  total_cves: number
+  max_cvss: number
+  block_threshold: number
+  gate_decision: 'BLOCK_DEPLOY' | 'WARN' | 'PASS'
+  blocked: boolean
+  severity_counts: Record<'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW', number>
+  topological_blast_order: string[]
+  blast_radius_order: string[]
+  findings: SBOMFinding[]
+}
+
+export interface PostmortemTimelineEntry {
+  timestamp: string
+  actor: string
+  event: string
+}
+
+export interface PostmortemActionItem {
+  priority: string
+  owner: string
+  task: string
+  due_date: string
+}
+
+export interface PostmortemExportResponse {
+  incident_id: string
+  service_id: string
+  severity: string
+  commander: string
+  redactions_applied: string[]
+  blast_radius_summary: {
+    total_impacted_services: number
+    tier0_impacted: string[]
+  }
+  markdown: string
+}
+
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
@@ -193,6 +251,34 @@ export const devsecopsApi = {
     block_threshold: number
   }) =>
     requestJson<CveGateResponse>('/api/v1/security/cve-gate', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  scanSBOM: (payload: {
+    service_id?: string
+    sbom?: Record<string, unknown>
+    block_threshold?: number
+  }) =>
+    requestJson<SBOMScanResponse>('/api/v1/security/sbom-scan', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  exportPostmortem: (payload: {
+    incident_id: string
+    title: string
+    service_id: string
+    severity: string
+    commander: string
+    summary: string
+    root_cause: string
+    timeline: PostmortemTimelineEntry[]
+    action_items: PostmortemActionItem[]
+    include_blast_radius?: boolean
+    sbom?: Record<string, unknown>
+  }) =>
+    requestJson<PostmortemExportResponse>('/api/v1/incidents/postmortem', {
       method: 'POST',
       body: JSON.stringify(payload),
     }),

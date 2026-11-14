@@ -6,7 +6,7 @@ requires_shutdown: true
 entity_id: ERR-CNC-401
 entity_type: FaultCode
 title: CNC Spindle Critical Overtemperature
-updated_at: 2026-11-13T12:06:10.192862+00:00
+updated_at: 2026-11-14T01:22:00.940154+00:00
 ---
 
 # CNC Spindle Critical Overtemperature (`ERR-CNC-401`)

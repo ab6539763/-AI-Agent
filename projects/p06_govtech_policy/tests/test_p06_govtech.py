@@ -13,6 +13,13 @@ from projects.p06_govtech_policy.app.ontology import (
     CitizenProfile,
     seed_default_ontology,
 )
+from projects.p06_govtech_policy.app.workflow_router import (
+    CrossDeptWorkflowRouter,
+    PolicyDiffRequest,
+    PolicyGazetteDiffer,
+    PolicyRevision,
+    WorkflowRouteRequest,
+)
 
 
 def test_ontology_multi_rule_eligibility_and_routing() -> None:
@@ -483,3 +490,139 @@ def test_enterprise_policy_batch_match_matrix(tmp_path: Path) -> None:
         json={"profiles": [payload["profiles"][0]], "program_ids": ["UNKNOWN-PROG"]},
     )
     assert r_err.status_code == 404
+
+
+def test_cross_dept_workflow_router_sequential_and_parallel() -> None:
+    """Test CrossDeptWorkflowRouter for hybrid_parallel enterprise & sequential citizen cases."""
+    router = CrossDeptWorkflowRouter()
+
+    # High-value enterprise case: 人社局 & 科技局 run in parallel (5 SLA days), then 财政局 (3 SLA days) = 8 days
+    ent_route = router.route_case(
+        WorkflowRouteRequest(
+            applicant_id="ENT-ROUTE-01",
+            applicant_type="enterprise",
+            program_id="PROG-TECH-RD-500K",
+            program_name="高新技术企业研发创新补贴",
+            amount=500000.0,
+            approved=True,
+            tags=["高新技术", "专精特新"],
+            current_step=2,
+        )
+    )
+    assert ent_route.route_summary == "人社局 -> 科技局 -> 财政局"
+    assert ent_route.workflow_pattern == "hybrid_parallel"
+    assert ent_route.fast_track is False
+    assert ent_route.total_sla_days == 8
+    assert len(ent_route.stages) == 3
+    assert ent_route.stages[0].execution_mode == "parallel"
+    assert ent_route.stages[1].execution_mode == "parallel"
+    assert ent_route.stages[2].execution_mode == "sequential"
+    assert ent_route.stages[0].status == "completed"
+    assert ent_route.stages[2].status == "in_progress"
+    assert len(ent_route.consolidated_documents) >= 6
+
+    # Citizen fast-track case (< 50k): sequential 2 + 2 + 2 = 6 SLA days
+    cit_route = router.route_case(
+        WorkflowRouteRequest(
+            applicant_id="CIT-ROUTE-02",
+            applicant_type="citizen",
+            program_id="PROG-HR-HOUSING-24K",
+            amount=24000.0,
+            approved=True,
+            tags=["青年人才"],
+            current_step=1,
+        )
+    )
+    assert cit_route.route_summary == "人社局 -> 科技局 -> 财政局"
+    assert cit_route.workflow_pattern == "sequential"
+    assert cit_route.fast_track is True
+    assert cit_route.total_sla_days == 6
+
+
+def test_policy_gazette_differ_subsidy_caps_and_clauses() -> None:
+    """Test PolicyGazetteDiffer baseline diff and custom revision diff."""
+    differ = PolicyGazetteDiffer()
+
+    baseline_diff = differ.diff(PolicyDiffRequest(policy_id="POL-2026-TECH-01"))
+    assert baseline_diff.has_changes is True
+    assert baseline_diff.subsidy_cap_delta == 200000.0
+    assert baseline_diff.old_status == "expired"
+    assert baseline_diff.new_status == "active"
+    assert any(c.change_type == "added" and c.clause_ref == "§第6条" for c in baseline_diff.clause_diffs)
+    assert any(c.change_type == "modified" and c.clause_ref == "§第5条" for c in baseline_diff.clause_diffs)
+
+    # Custom revisions
+    custom_diff = differ.diff(
+        PolicyDiffRequest(
+            old_revision=PolicyRevision(
+                policy_id="POL-CUSTOM-01",
+                version="v1",
+                title="数字化转型专项资金",
+                effective_date="2025-01-01",
+                status="expired",
+                subsidy_cap=100000.0,
+                eligibility_threshold="年营收>=50万元",
+                clauses={"§第1条": "支持中小企业上云。", "§第2条": "旧版附加条款。"},
+            ),
+            new_revision=PolicyRevision(
+                policy_id="POL-CUSTOM-01",
+                version="v2",
+                title="数字化转型专项资金",
+                effective_date="2026-01-01",
+                status="active",
+                subsidy_cap=250000.0,
+                eligibility_threshold="年营收>=30万元",
+                clauses={"§第1条": "支持中小企业上云与智改数转。", "§第3条": "新增绿色通道。"},
+            ),
+        )
+    )
+    assert custom_diff.subsidy_cap_delta == 150000.0
+    clause_map = {c.clause_ref: c.change_type for c in custom_diff.clause_diffs}
+    assert clause_map["§第1条"] == "modified"
+    assert clause_map["§第2条"] == "removed"
+    assert clause_map["§第3条"] == "added"
+
+
+def test_fastapi_workflow_route_and_gazette_diff_endpoints(tmp_path: Path) -> None:
+    """Test POST /api/v1/workflow/route-case and POST /api/v1/policy/gazette-diff."""
+    app = create_app(data_dir=tmp_path / "workflow_api_data", seed_defaults=True)
+    client = TestClient(app)
+
+    r_route = client.post(
+        "/api/v1/workflow/route-case",
+        json={
+            "applicant_id": "ENT-API-01",
+            "applicant_type": "enterprise",
+            "program_id": "PROG-TECH-RD-500K",
+            "amount": 500000.0,
+            "approved": True,
+            "tags": ["高新技术"],
+            "current_step": 1,
+        },
+    )
+    assert r_route.status_code == 200
+    route_data = r_route.json()
+    assert route_data["route_summary"] == "人社局 -> 科技局 -> 财政局"
+    assert route_data["total_sla_days"] == 8
+    assert len(route_data["stages"]) == 3
+
+    r_diff = client.post(
+        "/api/v1/policy/gazette-diff",
+        json={"policy_id": "POL-2026-HR-02"},
+    )
+    assert r_diff.status_code == 200
+    diff_data = r_diff.json()
+    assert diff_data["subsidy_cap_delta"] == 6000.0
+    assert diff_data["new_status"] == "active"
+
+    # Unknown policy_id returns 404
+    r_missing = client.post(
+        "/api/v1/policy/gazette-diff",
+        json={"policy_id": "POL-NON-EXISTENT"},
+    )
+    assert r_missing.status_code == 404
+
+    # Missing both policy_id and revisions returns 400
+    r_bad = client.post("/api/v1/policy/gazette-diff", json={})
+    assert r_bad.status_code == 400
+

@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .fde_pipeline import LegalFDEPipeline
 from .llm_wiki import LegalLLMWiki
 from .ontology import LegalOntologyRegistry
+from .redline_engine import ObligationExtractor, RedlinePlaybookEngine
 
 
 class WikiIngestRequest(BaseModel):
@@ -43,6 +44,14 @@ class ContractRedlineDiffRequest(BaseModel):
     requested_by: str = "legal_ops"
 
 
+class ContractObligationsRequest(BaseModel):
+    contract_id: str = "ctr_obligations"
+    title: str = "Contract Obligation Calendar"
+    text: str
+    effective_date: str = "2026-01-01"
+    requested_by: str = "legal_ops"
+
+
 class ActionApproveRequest(BaseModel):
     action_id: str
     decision: Literal["approved", "rejected"]
@@ -61,6 +70,8 @@ def create_app(wiki_dir: str | Path | None = None) -> FastAPI:
     registry = LegalOntologyRegistry(seed_defaults=True)
     wiki = LegalLLMWiki(root_dir=resolved_wiki_dir, registry=registry)
     pipeline = LegalFDEPipeline(registry=registry, wiki=wiki)
+    playbook_engine = RedlinePlaybookEngine()
+    obligation_extractor = ObligationExtractor()
 
     counters: dict[str, int] = {
         "requests_total": 0,
@@ -84,6 +95,8 @@ def create_app(wiki_dir: str | Path | None = None) -> FastAPI:
     app.state.registry = registry
     app.state.wiki = wiki
     app.state.pipeline = pipeline
+    app.state.playbook_engine = playbook_engine
+    app.state.obligation_extractor = obligation_extractor
     app.state.counters = counters
 
     @app.middleware("http")
@@ -283,6 +296,42 @@ def create_app(wiki_dir: str | Path | None = None) -> FastAPI:
             revised_text=payload.revised_text,
             requested_by=payload.requested_by,
         )
+
+    @app.post("/api/v1/contracts/obligations")
+    def extract_contract_obligations(payload: ContractObligationsRequest) -> dict[str, Any]:
+        masked_text, pii_count = pipeline.mask_pii(payload.text)
+        timeline = obligation_extractor.extract_timeline(
+            contract_id=payload.contract_id,
+            title=payload.title,
+            text=masked_text,
+            effective_date=payload.effective_date,
+        )
+        audit_entry = pipeline.record_audit(
+            event_type="OBLIGATIONS_EXTRACTED",
+            actor=payload.requested_by,
+            target_id=payload.contract_id,
+            details={
+                "total_obligations": timeline.total_obligations,
+                "pii_masked_count": pii_count,
+                "summary_counts": timeline.summary_counts,
+            },
+        )
+        return {
+            **timeline.model_dump(),
+            "pii_masked_count": pii_count,
+            "audit_entry": audit_entry,
+        }
+
+    @app.get("/api/v1/contracts/playbook")
+    def get_redline_playbook(
+        clause_type: str | None = Query(default=None),
+    ) -> dict[str, Any]:
+        entries = playbook_engine.list_entries(clause_type=clause_type)
+        return {
+            "count": len(entries),
+            "clause_types": ["liability_cap", "indemnification", "ip_ownership", "termination"],
+            "entries": [e.model_dump() for e in entries],
+        }
 
     return app
 

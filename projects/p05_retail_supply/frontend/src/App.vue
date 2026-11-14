@@ -4,7 +4,6 @@ import {
   apiClient,
   type AuditLogItem,
   type DashboardOverview,
-  type MarginSimulateResponse,
   type SafetyCheckItem,
   type SKUItem,
   type SupplierItem,
@@ -12,8 +11,10 @@ import {
   type WarehouseItem,
   type WikiPageItem,
 } from "./api/client";
+import MarginSandbox from "./components/MarginSandbox.vue";
+import WarehouseMatrix from "./components/WarehouseMatrix.vue";
 
-type TabId = "sandbox" | "ontology" | "wiki" | "hitl";
+type TabId = "sandbox" | "matrix" | "ontology" | "wiki" | "hitl";
 
 const activeTab = ref<TabId>("sandbox");
 const loading = ref(false);
@@ -28,16 +29,6 @@ const wikiPages = ref<WikiPageItem[]>([]);
 const actions = ref<SupplyActionItem[]>([]);
 const auditLogs = ref<AuditLogItem[]>([]);
 
-// Replenishment form
-const replenishSku = ref("SKU-1001");
-const replenishQty = ref<string>("");
-const replenishPrice = ref<string>("");
-const lastReplenishResult = ref<Record<string, unknown> | null>(null);
-
-// Margin Simulation Sandbox
-const globalDiscountPct = ref<number>(15);
-const simResult = ref<MarginSimulateResponse | null>(null);
-
 // Wiki search, lint, ingest
 const wikiSearchQuery = ref("");
 const wikiSearchAnswer = ref("");
@@ -50,7 +41,7 @@ const ingestContent = ref("Apply 10% off on [[SKU-1002]] fulfilled from [[WH-WES
 
 // HITL approval
 const approverName = ref("merchandiser-lead");
-const approvalComment = ref("Approved via P05 Workbench");
+const approvalComment = ref("Approved via P05 Retail BI Workbench");
 
 function notify(type: "ok" | "err", text: string) {
   banner.value = { type, text };
@@ -81,44 +72,6 @@ async function refreshAll() {
     notify("err", err instanceof Error ? err.message : String(err));
   } finally {
     loading.value = false;
-  }
-}
-
-async function submitReplenishment() {
-  try {
-    const payload: {
-      sku_id: string;
-      requested_qty?: number | null;
-      proposed_price?: number | null;
-    } = { sku_id: replenishSku.value };
-    if (replenishQty.value.trim() !== "") {
-      payload.requested_qty = Number(replenishQty.value);
-    }
-    if (replenishPrice.value.trim() !== "") {
-      payload.proposed_price = Number(replenishPrice.value);
-    }
-    const res = await apiClient.planReplenishment(payload);
-    lastReplenishResult.value = res;
-    notify("ok", `补货/调价指令 ${res.action.action_id} 状态: ${res.action.status}`);
-    await refreshAll();
-  } catch (err) {
-    notify("err", err instanceof Error ? err.message : String(err));
-  }
-}
-
-async function runMarginSimulation() {
-  try {
-    const res = await apiClient.simulateMargin({
-      global_discount_pct: globalDiscountPct.value / 100,
-    });
-    simResult.value = res;
-    notify(
-      res.all_passed ? "ok" : "err",
-      `毛利沙盘完成: ${res.guardrail_passed_count}/${res.total_skus_simulated} SKU 通过毛利红线`
-    );
-    await refreshAll();
-  } catch (err) {
-    notify("err", err instanceof Error ? err.message : String(err));
   }
 }
 
@@ -174,20 +127,22 @@ async function decideAction(actionId: string, approved: boolean) {
 
 onMounted(async () => {
   await refreshAll();
-  await runMarginSimulation();
 });
 </script>
 
 <template>
   <div class="shell">
     <header class="topbar">
-      <div>
-        <div class="eyebrow">P05 ENTERPRISE RETAIL &amp; SUPPLY CHAIN</div>
-        <h1>零售供应链增长与毛利治理工作台</h1>
+      <div class="brand">
+        <div class="eyebrow">P05 NEW RETAIL BI · GROWTH &amp; EOQ REPLENISHMENT</div>
+        <h1>新零售增长毛利沙盘与 EOQ 智能补货中台</h1>
       </div>
-      <button class="btn-outline" :disabled="loading" @click="refreshAll">
-        {{ loading ? "同步中..." : "刷新数据" }}
-      </button>
+      <div class="top-actions">
+        <span class="live-chip">● 离线确定性引擎就绪</span>
+        <button class="btn-outline" :disabled="loading" @click="refreshAll">
+          {{ loading ? "同步中..." : "刷新全局数据" }}
+        </button>
+      </div>
     </header>
 
     <div v-if="banner" :class="['banner', banner.type]">
@@ -196,7 +151,7 @@ onMounted(async () => {
     </div>
 
     <section v-if="overview" class="kpi-grid">
-      <div class="kpi-card">
+      <div class="kpi-card indigo">
         <div class="kpi-label">在管 SKU 总数</div>
         <div class="kpi-value">{{ overview.total_skus }}</div>
       </div>
@@ -204,17 +159,17 @@ onMounted(async () => {
         <div class="kpi-label">缺货 / 交期预警</div>
         <div class="kpi-value">{{ overview.stockout_alerts }}</div>
       </div>
-      <div class="kpi-card accent">
+      <div class="kpi-card indigo">
         <div class="kpi-label">待采销 HITL 审批</div>
         <div class="kpi-value">{{ overview.pending_hitl_pos }}</div>
+      </div>
+      <div class="kpi-card emerald">
+        <div class="kpi-label">库存总成本 ($)</div>
+        <div class="kpi-value">${{ overview.total_inventory_value.toLocaleString() }}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">LLM Wiki 词条</div>
         <div class="kpi-value">{{ overview.wiki_pages }}</div>
-      </div>
-      <div class="kpi-card">
-        <div class="kpi-label">库存总成本 ($)</div>
-        <div class="kpi-value">${{ overview.total_inventory_value.toLocaleString() }}</div>
       </div>
       <div class="kpi-card">
         <div class="kpi-label">审计轨迹条数</div>
@@ -227,7 +182,13 @@ onMounted(async () => {
         :class="['tab', { active: activeTab === 'sandbox' }]"
         @click="activeTab = 'sandbox'"
       >
-        智能补货与毛利沙盘
+        促销毛利与 EOQ 沙盘
+      </button>
+      <button
+        :class="['tab', { active: activeTab === 'matrix' }]"
+        @click="activeTab = 'matrix'"
+      >
+        多仓库存与调拨矩阵
       </button>
       <button
         :class="['tab', { active: activeTab === 'ontology' }]"
@@ -249,100 +210,17 @@ onMounted(async () => {
       </button>
     </nav>
 
-    <!-- Tab 1: 智能补货与毛利沙盘 -->
-    <main v-if="activeTab === 'sandbox'" class="panel-grid">
-      <section class="card">
-        <h2>FDE 智能补货与动态调价触发</h2>
-        <div class="form-row">
-          <label>
-            目标 SKU
-            <select v-model="replenishSku">
-              <option v-for="s in skus" :key="s.sku_id" :value="s.sku_id">
-                {{ s.sku_id }} · {{ s.name }}
-              </option>
-            </select>
-          </label>
-          <label>
-            采购数量 (留空自动按安全库存推荐)
-            <input v-model="replenishQty" type="number" min="0" placeholder="自动推荐" />
-          </label>
-          <label>
-            拟议售价 $ (留空按当前目录价)
-            <input v-model="replenishPrice" type="number" step="0.01" placeholder="可选" />
-          </label>
-          <button class="btn-primary" @click="submitReplenishment">执行 FDE 决策</button>
-        </div>
-        <pre v-if="lastReplenishResult" class="json-box">{{
-          JSON.stringify(lastReplenishResult.action, null, 2)
-        }}</pre>
-      </section>
-
-      <section class="card">
-        <div class="card-head">
-          <h2>多 SKU 促销毛利沙盘 &amp; 红线护栏</h2>
-          <div class="inline-controls">
-            <label class="inline-label">
-              统一促销折扣 (%):
-              <input v-model.number="globalDiscountPct" type="number" min="0" max="90" step="1" />
-            </label>
-            <button class="btn-primary" @click="runMarginSimulation">运行毛利沙盘</button>
-          </div>
-        </div>
-
-        <div v-if="simResult" class="sim-summary">
-          <div>
-            <span>通过红线:</span>
-            <strong>{{ simResult.guardrail_passed_count }} / {{ simResult.total_skus_simulated }}</strong>
-          </div>
-          <div>
-            <span>预计总营收:</span>
-            <strong>${{ simResult.total_projected_revenue.toLocaleString() }}</strong>
-          </div>
-          <div>
-            <span>预计总毛利:</span>
-            <strong>${{ simResult.total_projected_profit.toLocaleString() }}</strong>
-          </div>
-          <div>
-            <span>综合毛利率:</span>
-            <strong>{{ (simResult.blended_margin_pct * 100).toFixed(2) }}%</strong>
-          </div>
-        </div>
-
-        <table v-if="simResult" class="data-table">
-          <thead>
-            <tr>
-              <th>SKU</th>
-              <th>成本 / 目录价</th>
-              <th>折后价</th>
-              <th>测算毛利率</th>
-              <th>毛利红线</th>
-              <th>护栏状态</th>
-              <th>预计利润</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="r in simResult.results" :key="r.sku_id">
-              <td>
-                <strong>{{ r.sku_id }}</strong>
-                <div class="sub">{{ r.sku_name }}</div>
-              </td>
-              <td>${{ r.unit_cost }} / ${{ r.list_price }}</td>
-              <td>${{ r.effective_price }} (-{{ (r.promo_discount_pct * 100).toFixed(0) }}%)</td>
-              <td>{{ (r.gross_margin_pct * 100).toFixed(2) }}%</td>
-              <td>{{ (r.min_margin_pct * 100).toFixed(0) }}%</td>
-              <td>
-                <span :class="['badge', r.guardrail_passed ? 'ok' : 'danger']">
-                  {{ r.guardrail_passed ? "PASSED" : "BLOCKED" }}
-                </span>
-              </td>
-              <td>${{ r.projected_profit.toLocaleString() }}</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+    <!-- Tab 1: Margin & EOQ Sandbox -->
+    <main v-if="activeTab === 'sandbox'">
+      <MarginSandbox :skus="skus" @notify="notify" @refresh="refreshAll" />
     </main>
 
-    <!-- Tab 2: 供应链本体台账 -->
+    <!-- Tab 2: Multi-Warehouse Allocation Matrix -->
+    <main v-if="activeTab === 'matrix'">
+      <WarehouseMatrix @notify="notify" />
+    </main>
+
+    <!-- Tab 3: Ontology Ledger -->
     <main v-if="activeTab === 'ontology'" class="panel-grid">
       <section class="card">
         <h2>SKU 安全库存与交期风险监测</h2>
@@ -433,7 +311,7 @@ onMounted(async () => {
       </div>
     </main>
 
-    <!-- Tab 3: 运营 LLM Wiki -->
+    <!-- Tab 4: Operational LLM Wiki -->
     <main v-if="activeTab === 'wiki'" class="panel-grid">
       <section class="card">
         <div class="card-head">
@@ -489,7 +367,7 @@ onMounted(async () => {
       </div>
     </main>
 
-    <!-- Tab 4: 采销 HITL 审批与审计 -->
+    <!-- Tab 5: HITL Approval & Audit -->
     <main v-if="activeTab === 'hitl'" class="panel-grid">
       <section class="card">
         <div class="card-head">
@@ -535,7 +413,7 @@ onMounted(async () => {
               <td class="sub">{{ act.reason }}</td>
               <td>
                 <div v-if="act.status === 'PENDING_APPROVAL'" class="inline-controls">
-                  <button class="btn-primary" @click="decideAction(act.action_id, true)">
+                  <button class="btn-emerald" @click="decideAction(act.action_id, true)">
                     批准
                   </button>
                   <button class="btn-danger" @click="decideAction(act.action_id, false)">
@@ -583,7 +461,7 @@ onMounted(async () => {
   color-scheme: light;
 }
 .shell {
-  max-width: 1280px;
+  max-width: 1320px;
   margin: 0 auto;
   padding: 24px;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -595,21 +473,41 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 18px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #ffffff 0%, #eef2ff 65%, #ecfdf5 100%);
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
 }
 .eyebrow {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 800;
   letter-spacing: 0.08em;
-  color: #2563eb;
+  color: #4f46e5;
 }
 h1 {
   margin: 4px 0 0;
   font-size: 22px;
+  color: #0f172a;
 }
 h2 {
   margin: 0 0 12px;
   font-size: 16px;
+}
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.live-chip {
+  font-size: 12px;
+  font-weight: 700;
+  color: #059669;
+  background: #d1fae5;
+  padding: 5px 10px;
+  border-radius: 999px;
 }
 .banner {
   display: flex;
@@ -621,8 +519,8 @@ h2 {
   font-size: 14px;
 }
 .banner.ok {
-  background: #dcfce7;
-  color: #166534;
+  background: #d1fae5;
+  color: #065f46;
 }
 .banner.err {
   background: #fee2e2;
@@ -641,16 +539,20 @@ h2 {
   margin-bottom: 18px;
 }
 .kpi-card {
-  background: #fff;
+  background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+.kpi-card.indigo {
+  border-left: 4px solid #4f46e5;
+}
+.kpi-card.emerald {
+  border-left: 4px solid #10b981;
 }
 .kpi-card.warn {
   border-left: 4px solid #f59e0b;
-}
-.kpi-card.accent {
-  border-left: 4px solid #2563eb;
 }
 .kpi-label {
   font-size: 12px;
@@ -658,13 +560,15 @@ h2 {
 }
 .kpi-value {
   font-size: 24px;
-  font-weight: 700;
+  font-weight: 800;
   margin-top: 4px;
+  color: #0f172a;
 }
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
-  border-bottom: 1px solid #cbd5e1;
+  border-bottom: 2px solid #e2e8f0;
   margin-bottom: 18px;
 }
 .tab {
@@ -676,10 +580,11 @@ h2 {
   color: #475569;
   cursor: pointer;
   border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
 }
 .tab.active {
-  color: #2563eb;
-  border-bottom-color: #2563eb;
+  color: #4f46e5;
+  border-bottom-color: #4f46e5;
 }
 .panel-grid {
   display: flex;
@@ -692,9 +597,9 @@ h2 {
   gap: 16px;
 }
 .card {
-  background: #fff;
+  background: #ffffff;
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 16px;
 }
 .card-head {
@@ -704,25 +609,6 @@ h2 {
   flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 12px;
-}
-.form-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: flex-end;
-}
-.form-row label,
-.inline-label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  color: #475569;
-}
-.inline-label {
-  flex-direction: row;
-  align-items: center;
-  gap: 8px;
 }
 .form-col {
   display: flex;
@@ -743,45 +629,40 @@ textarea {
   align-items: center;
 }
 .btn-primary {
-  background: #2563eb;
-  color: #fff;
+  background: #4f46e5;
+  color: #ffffff;
   border: none;
   padding: 8px 14px;
-  border-radius: 6px;
+  border-radius: 8px;
   font-weight: 600;
   cursor: pointer;
 }
-.btn-outline {
-  background: #fff;
-  color: #0f172a;
-  border: 1px solid #cbd5e1;
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.btn-danger {
-  background: #dc2626;
-  color: #fff;
+.btn-emerald {
+  background: #10b981;
+  color: #ffffff;
   border: none;
   padding: 6px 12px;
   border-radius: 6px;
   font-weight: 600;
   cursor: pointer;
 }
-.sim-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 24px;
-  background: #f1f5f9;
-  padding: 10px 14px;
+.btn-outline {
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #cbd5e1;
+  padding: 8px 14px;
   border-radius: 8px;
-  margin-bottom: 12px;
-  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
-.sim-summary span {
-  color: #64748b;
-  margin-right: 6px;
+.btn-danger {
+  background: #dc2626;
+  color: #ffffff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
 }
 .data-table {
   width: 100%;
@@ -814,8 +695,8 @@ textarea {
   color: #334155;
 }
 .badge.ok {
-  background: #dcfce7;
-  color: #166534;
+  background: #d1fae5;
+  color: #065f46;
 }
 .badge.warn {
   background: #fef3c7;
@@ -837,9 +718,9 @@ textarea {
   max-height: 260px;
 }
 .info-box {
-  background: #eff6ff;
-  border: 1px solid #bfdbfe;
-  color: #1e3a8a;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  color: #3730a3;
   padding: 10px 12px;
   border-radius: 8px;
   font-size: 13px;
@@ -859,8 +740,8 @@ textarea {
   cursor: pointer;
 }
 .wiki-list li.selected {
-  border-color: #2563eb;
-  background: #eff6ff;
+  border-color: #4f46e5;
+  background: #eef2ff;
 }
 .wiki-title {
   display: flex;

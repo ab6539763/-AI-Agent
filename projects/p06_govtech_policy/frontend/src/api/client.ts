@@ -187,6 +187,94 @@ export interface AuditEvent {
   metadata: Record<string, unknown>
 }
 
+export interface BureauStage {
+  stage_id: string
+  bureau: string
+  bureau_short: string
+  execution_mode: 'sequential' | 'parallel'
+  step_order: number
+  sla_days: number
+  status: 'completed' | 'in_progress' | 'pending'
+  required_documents: string[]
+  responsibility: string
+}
+
+export interface WorkflowRouteRequest {
+  case_id?: string | null
+  applicant_id: string
+  applicant_type: ApplicantType
+  program_id: string
+  program_name?: string
+  amount: number
+  approved?: boolean
+  tags?: string[]
+  current_step?: number
+}
+
+export interface WorkflowRouteResult {
+  case_id: string
+  applicant_id: string
+  program_id: string
+  workflow_pattern: 'sequential' | 'hybrid_parallel'
+  route_summary: string
+  total_sla_days: number
+  fast_track: boolean
+  stages: BureauStage[]
+  consolidated_documents: string[]
+  routed_at: string
+}
+
+export interface PolicyRevision {
+  policy_id: string
+  version: string
+  title: string
+  department?: string
+  effective_date: string
+  expiry_date?: string | null
+  status?: 'active' | 'expired' | 'draft' | 'revoked'
+  subsidy_cap: number
+  eligibility_threshold?: string
+  clauses: Record<string, string>
+}
+
+export interface ThresholdChange {
+  field: string
+  label: string
+  old_value: unknown
+  new_value: unknown
+  delta: number | null
+  change_type: 'increased' | 'decreased' | 'modified' | 'unchanged'
+}
+
+export interface ClauseDiffItem {
+  clause_ref: string
+  change_type: 'added' | 'removed' | 'modified' | 'unchanged'
+  old_text: string | null
+  new_text: string | null
+  highlight_summary: string
+}
+
+export interface PolicyDiffRequest {
+  policy_id?: string | null
+  old_revision?: PolicyRevision | null
+  new_revision?: PolicyRevision | null
+}
+
+export interface PolicyDiffResult {
+  policy_id: string
+  old_version: string
+  new_version: string
+  title: string
+  department: string
+  old_status: string
+  new_status: string
+  has_changes: boolean
+  subsidy_cap_delta: number
+  threshold_changes: ThresholdChange[]
+  clause_diffs: ClauseDiffItem[]
+  summary: string
+}
+
 async function requestJson<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     headers: {
@@ -257,4 +345,14 @@ export const govtechApi = {
     }),
   getAuditLogs: (limit = 100) =>
     requestJson<AuditEvent[]>(`/api/v1/audit/logs?limit=${limit}`),
+  routeCase: (payload: WorkflowRouteRequest) =>
+    requestJson<WorkflowRouteResult>('/api/v1/workflow/route-case', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  diffPolicyGazette: (payload: PolicyDiffRequest) =>
+    requestJson<PolicyDiffResult>('/api/v1/policy/gazette-diff', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 }

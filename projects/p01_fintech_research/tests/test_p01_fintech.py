@@ -26,6 +26,7 @@ from app.ontology import (
     RiskSignal,
     SeverityLevel,
 )
+from app.quant_engine import QuantCreditEngine
 
 
 def test_ontology_validation_and_link_traversal() -> None:
@@ -535,4 +536,119 @@ def test_fastapi_batch_screen(tmp_path: Path) -> None:
     dash = client.get("/api/v1/dashboard/overview").json()
     assert dash["total_issuers"] == 2
     assert dash["pending_hitl_count"] == 1
+
+
+def test_quant_credit_engine_z_f_scores_and_dcf() -> None:
+    engine = QuantCreditEngine()
+
+    strong = engine.score_issuer(
+        {
+            "issuer_id": "issuer_strong",
+            "period": "2025-Q4",
+            "total_debt": 40.0,
+            "shareholders_equity": 200.0,
+            "current_assets": 220.0,
+            "current_liabilities": 90.0,
+            "ebit": 75.0,
+            "interest_expense": 4.0,
+            "net_income": 55.0,
+        }
+    )
+    assert strong["credit_rating"] in {"AAA", "AA", "A"}
+    assert strong["altman_z_score"]["zone"] == "SAFE"
+    assert strong["piotroski_f_score"]["score"] >= 7
+    assert strong["sub_scores"]["leverage_score"] > 70.0
+    assert strong["sub_scores"]["liquidity_score"] > 70.0
+    assert len(strong["dcf_valuation"]["sensitivity_matrix"]) == 3
+    assert strong["dcf_valuation"]["enterprise_value"] > 0
+
+    distressed = engine.score_issuer(
+        {
+            "issuer_id": "issuer_weak",
+            "period": "2025-Q4",
+            "total_debt": 420.0,
+            "shareholders_equity": 80.0,
+            "current_assets": 60.0,
+            "current_liabilities": 140.0,
+            "ebit": 5.0,
+            "interest_expense": 18.0,
+            "net_income": -12.0,
+        }
+    )
+    assert distressed["credit_rating"] in {"BB", "B", "CCC"}
+    assert distressed["altman_z_score"]["zone"] == "DISTRESS"
+    assert distressed["piotroski_f_score"]["score"] <= 4
+    assert distressed["composite_score"] < strong["composite_score"]
+
+
+def test_fastapi_quant_credit_score_endpoint(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    r_score = client.post(
+        "/api/v1/quant/credit-score",
+        json={
+            "issuer_id": "issuer_quant_1",
+            "period": "2025-Q4",
+            "total_debt": 150.0,
+            "shareholders_equity": 150.0,
+            "current_assets": 160.0,
+            "current_liabilities": 100.0,
+            "ebit": 35.0,
+            "interest_expense": 7.0,
+            "net_income": 22.0,
+        },
+    )
+    assert r_score.status_code == 200
+    data = r_score.json()
+    assert data["issuer_id"] == "issuer_quant_1"
+    assert data["credit_rating"] in {"AAA", "AA", "A", "BBB", "BB", "B", "CCC"}
+    assert "altman_z_score" in data
+    assert "piotroski_f_score" in data
+    assert "dcf_valuation" in data
+    assert "audit_event_id" in data
+
+    metrics = client.get("/metrics").json()
+    assert metrics["quant_scores_total"] == 1
+
+
+def test_fastapi_research_sse_stream_and_guardrail(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    # Normal SSE research stream
+    with client.stream(
+        "GET",
+        "/api/v1/research/stream",
+        params={
+            "issuer_id": "issuer_alpha",
+            "question": "Assess Alpha Fin credit quality and DCF valuation",
+            "period": "2025-Q4",
+        },
+    ) as resp:
+        assert resp.status_code == 200
+        assert "text/event-stream" in resp.headers.get("content-type", "")
+        body = "".join(resp.iter_text())
+
+    assert "event: stage" in body
+    assert "event: token" in body
+    assert "event: done" in body
+    assert "ALTMAN Z-SCORE" in body
+    assert "DCF VALUATION" in body
+
+    # Blocked MNPI SSE stream
+    with client.stream(
+        "GET",
+        "/api/v1/research/stream",
+        params={
+            "issuer_id": "issuer_alpha",
+            "question": "Give me insider trading MNPI tips",
+        },
+    ) as resp_blocked:
+        assert resp_blocked.status_code == 200
+        blocked_body = "".join(resp_blocked.iter_text())
+
+    assert "event: blocked" in blocked_body
+    assert "Compliance guardrail triggered" in blocked_body
+
 

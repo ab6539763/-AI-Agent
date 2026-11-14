@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
+import ClauseNavigator from "./components/ClauseNavigator.vue";
+import RedlineDiffViewer from "./components/RedlineDiffViewer.vue";
 import {
   legalApi,
   type AuditLogEntry,
@@ -8,15 +10,17 @@ import {
   type DashboardOverview,
   type LegalActionItem,
   type LegalLinkItem,
+  type ObligationTimelineResponse,
+  type PlaybookClauseEntry,
   type RedlineDiffResponse,
   type RegulationItem,
   type WikiLintResponse,
   type WikiPageItem,
 } from "./api/client";
 
-type TabKey = "review" | "ontology" | "wiki" | "hitl";
+type TabKey = "studio" | "diff" | "ontology" | "wiki" | "hitl";
 
-const activeTab = ref<TabKey>("review");
+const activeTab = ref<TabKey>("studio");
 const apiOnline = ref<boolean>(false);
 const loading = ref<boolean>(false);
 const errorBanner = ref<string>("");
@@ -36,28 +40,35 @@ const overview = ref<DashboardOverview>({
   recent_contracts: [],
 });
 
-// Tab 1: Contract Review & Redline Diff
 const reviewForm = reactive({
   contract_id: "ctr_enterprise_2026",
-  title: "全球云服务主协议 (MSA)",
+  title: "Master Cloud Services Agreement (MSA)",
   counterparty: "Acme Cloud Corp.",
   jurisdiction: "EU / US-NY",
+  effective_date: "2026-01-15",
   liability_cap_usd: 500000,
-  text: `1. Liability & Indemnification
+  text: `1. Limitation of Liability
 Vendor shall have unlimited liability for all data breach and GDPR personal data claims. Legal notices to counsel@acme.com or +1-415-555-0199, SSN 123-45-6789.
 
-2. Data Protection
-Vendor may sell personal data without opt-out and transfer data under EU Directive 95/46/EC.
+2. Indemnification & Breach Notice
+Vendor shall notify Customer within 48 hours of any security incident and indemnify Customer for third-party IP claims.
 
-3. Confidentiality
-Both parties shall maintain SOC2 encryption and confidential access controls.`,
+3. Service Levels & Termination
+Vendor shall maintain 99.9% uptime SLA. This Agreement shall auto-renew annually unless Customer provides 30 days prior written notice.
+
+4. Intellectual Property
+Vendor shall assign all pre-existing IP and deliverables upon execution.`,
 });
 
 const reviewResult = ref<ContractReviewResponse | null>(null);
+const obligationTimeline = ref<ObligationTimelineResponse | null>(null);
+const playbookEntries = ref<PlaybookClauseEntry[]>([]);
+const selectedClauseId = ref<string | null>(null);
+const clauseDecisions = reactive<Record<string, "accepted" | "rejected" | "pending">>({});
 
 const diffForm = reactive({
   contract_id: "ctr_diff_2026",
-  title: "MSA v1 vs v2 Redline 对比",
+  title: "MSA v1 vs v2 Redline Comparison",
   original_text: `1. Liability
 Vendor shall have unlimited liability for all claims.
 
@@ -69,16 +80,13 @@ Vendor total aggregate liability shall not exceed $500,000.
 2. Privacy
 Vendor shall process personal data strictly under GDPR Art.28.`,
 });
-
 const diffResult = ref<RedlineDiffResponse | null>(null);
 
-// Tab 2: Ontology
 const regulations = ref<RegulationItem[]>([]);
 const ontologyLinks = ref<LegalLinkItem[]>([]);
 const clauses = ref<ClauseItem[]>([]);
 const riskFilter = ref<string>("");
 
-// Tab 3: Wiki & Lint
 const wikiPages = ref<WikiPageItem[]>([]);
 const lintReport = ref<WikiLintResponse | null>(null);
 const wikiIngestForm = reactive({
@@ -89,16 +97,38 @@ const wikiIngestForm = reactive({
 });
 const wikiIngestMessage = ref<string>("");
 
-// Tab 4: HITL & Audit
 const pendingActions = ref<LegalActionItem[]>([]);
 const auditLogs = ref<AuditLogEntry[]>([]);
 const hitlApprover = ref<string>("gc_chief_counsel");
 const hitlNotes = ref<string>("Reviewed by General Counsel.");
 
+const activeClauses = computed(() => reviewResult.value?.clauses ?? []);
+
+const selectedClause = computed<ClauseItem | null>(() => {
+  if (!activeClauses.value.length) return null;
+  return (
+    activeClauses.value.find((c) => c.id === selectedClauseId.value) ??
+    activeClauses.value[0]
+  );
+});
+
+const matchingPlaybookEntry = computed<PlaybookClauseEntry | null>(() => {
+  if (!selectedClause.value) return null;
+  return (
+    playbookEntries.value.find(
+      (entry) => entry.clause_type === selectedClause.value?.clause_type
+    ) ?? null
+  );
+});
+
 const filteredClauses = computed(() => {
   if (!riskFilter.value) return clauses.value;
   return clauses.value.filter((c) => c.risk_level === riskFilter.value);
 });
+
+const acceptedCount = computed(
+  () => Object.values(clauseDecisions).filter((v) => v === "accepted").length
+);
 
 function riskBadgeClass(level: string | null | undefined): string {
   switch (level) {
@@ -118,13 +148,14 @@ async function refreshAll(): Promise<void> {
   try {
     await legalApi.health();
     apiOnline.value = true;
-    const [ov, regs, cls, pages, pending, logs] = await Promise.all([
+    const [ov, regs, cls, pages, pending, logs, pb] = await Promise.all([
       legalApi.getOverview(),
       legalApi.listRegulations(),
       legalApi.listClauses(),
       legalApi.listWikiPages(),
       legalApi.listPendingActions(),
       legalApi.listAuditLogs(50),
+      legalApi.getPlaybook(),
     ]);
     overview.value = ov;
     regulations.value = regs.regulations;
@@ -133,6 +164,7 @@ async function refreshAll(): Promise<void> {
     wikiPages.value = pages.pages;
     pendingActions.value = pending.actions;
     auditLogs.value = logs.logs;
+    playbookEntries.value = pb.entries;
   } catch (err) {
     apiOnline.value = false;
     errorBanner.value = err instanceof Error ? err.message : String(err);
@@ -143,20 +175,46 @@ async function submitContractReview(): Promise<void> {
   loading.value = true;
   errorBanner.value = "";
   try {
-    reviewResult.value = await legalApi.reviewContract({
-      contract_id: reviewForm.contract_id,
-      title: reviewForm.title,
-      counterparty: reviewForm.counterparty,
-      jurisdiction: reviewForm.jurisdiction,
-      liability_cap_usd: reviewForm.liability_cap_usd || null,
-      text: reviewForm.text,
-    });
+    const [rev, obl] = await Promise.all([
+      legalApi.reviewContract({
+        contract_id: reviewForm.contract_id,
+        title: reviewForm.title,
+        counterparty: reviewForm.counterparty,
+        jurisdiction: reviewForm.jurisdiction,
+        liability_cap_usd: reviewForm.liability_cap_usd || null,
+        text: reviewForm.text,
+      }),
+      legalApi.extractObligations({
+        contract_id: reviewForm.contract_id,
+        title: reviewForm.title,
+        text: reviewForm.text,
+        effective_date: reviewForm.effective_date,
+      }),
+    ]);
+    reviewResult.value = rev;
+    obligationTimeline.value = obl;
+    if (rev.clauses.length > 0) {
+      selectedClauseId.value = rev.clauses[0].id;
+      for (const cl of rev.clauses) {
+        if (!clauseDecisions[cl.id]) {
+          clauseDecisions[cl.id] = "pending";
+        }
+      }
+    }
     await refreshAll();
   } catch (err) {
     errorBanner.value = err instanceof Error ? err.message : String(err);
   } finally {
     loading.value = false;
   }
+}
+
+function handleAcceptRedline(clauseId: string, _tier: "standard" | "fallback"): void {
+  clauseDecisions[clauseId] = "accepted";
+}
+
+function handleRejectRedline(clauseId: string): void {
+  clauseDecisions[clauseId] = "rejected";
 }
 
 async function submitRedlineDiff(): Promise<void> {
@@ -188,7 +246,7 @@ async function submitWikiIngest(): Promise<void> {
       doc_type: wikiIngestForm.doc_type,
       content: wikiIngestForm.content,
     });
-    wikiIngestMessage.value = `已入库实体: ${res.entities.join(", ")}`;
+    wikiIngestMessage.value = `Indexed Entities: ${res.entities.join(", ")}`;
     await refreshAll();
   } catch (err) {
     errorBanner.value = err instanceof Error ? err.message : String(err);
@@ -234,178 +292,243 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="shell">
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-badge">P03</div>
+  <div class="law-shell">
+    <header class="masthead">
+      <div class="brand-lockup">
+        <div class="firm-seal">§</div>
         <div>
-          <h1>企业级法务合规与合同审查工作台</h1>
-          <p class="subtitle">Legal Ontology · LLM Wiki · FDE Redline · General Counsel HITL</p>
+          <span class="firm-kicker">P03 LEGAL COUNSEL WORKBENCH</span>
+          <h1>Law Firm Document Review &amp; Redline Studio</h1>
+          <p class="subtitle">
+            Split-Pane Redline Playbook · Obligation Calendar · Regulatory Ontology · GC HITL
+          </p>
         </div>
       </div>
-      <div class="topbar-actions">
+      <div class="masthead-actions">
         <span :class="['status-pill', apiOnline ? 'online' : 'offline']">
-          {{ apiOnline ? "FastAPI 后端在线" : "后端离线" }}
+          {{ apiOnline ? "Counsel API Online" : "API Offline" }}
         </span>
-        <button class="btn btn-secondary" @click="refreshAll">刷新数据</button>
+        <button class="btn btn-secondary" @click="refreshAll">Sync Workspace</button>
       </div>
     </header>
 
     <div v-if="errorBanner" class="error-banner">
-      <strong>请求异常:</strong> {{ errorBanner }}
+      <strong>System Notice:</strong> {{ errorBanner }}
     </div>
 
-    <section class="kpi-grid">
+    <section class="kpi-ribbon">
       <div class="kpi-card">
-        <span class="kpi-label">已审查合同</span>
+        <span class="kpi-label">Matters Reviewed</span>
         <strong class="kpi-value">{{ overview.contracts_reviewed }}</strong>
-        <span class="kpi-sub">总合同数 {{ overview.contracts_total }}</span>
+        <span class="kpi-sub">Total Dockets: {{ overview.contracts_total }}</span>
       </div>
       <div class="kpi-card">
-        <span class="kpi-label">高/极高风险条款</span>
-        <strong class="kpi-value warn">{{ overview.high_risk_clauses }}</strong>
-        <span class="kpi-sub">总条款 {{ overview.clauses_total }}</span>
+        <span class="kpi-label">High / Critical Clauses</span>
+        <strong class="kpi-value burgundy">{{ overview.high_risk_clauses }}</strong>
+        <span class="kpi-sub">Total Clauses: {{ overview.clauses_total }}</span>
       </div>
       <div class="kpi-card">
-        <span class="kpi-label">现行法规本体</span>
+        <span class="kpi-label">Active Regulations</span>
         <strong class="kpi-value">{{ overview.active_regulations }}</strong>
-        <span class="kpi-sub">总法规 {{ overview.regulations_total }}</span>
+        <span class="kpi-sub">Ontology Rules: {{ overview.regulations_total }}</span>
       </div>
       <div class="kpi-card">
-        <span class="kpi-label">待法务总监审批</span>
-        <strong class="kpi-value accent">{{ overview.pending_gc_approvals }}</strong>
-        <span class="kpi-sub">HITL 队列</span>
+        <span class="kpi-label">Pending GC Sign-Off</span>
+        <strong class="kpi-value amber">{{ overview.pending_gc_approvals }}</strong>
+        <span class="kpi-sub">Accepted Redlines: {{ acceptedCount }}</span>
       </div>
       <div class="kpi-card">
-        <span class="kpi-label">PII 自动脱敏</span>
+        <span class="kpi-label">PII Redactions</span>
         <strong class="kpi-value">{{ overview.pii_masked_total }}</strong>
-        <span class="kpi-sub">Wiki 页面 {{ overview.wiki_pages_count }}</span>
+        <span class="kpi-sub">Wiki Pages: {{ overview.wiki_pages_count }}</span>
       </div>
       <div class="kpi-card">
-        <span class="kpi-label">合规审计日志</span>
+        <span class="kpi-label">Audit Trail Events</span>
         <strong class="kpi-value">{{ overview.audit_logs_count }}</strong>
-        <span class="kpi-sub">不可篡改追踪</span>
+        <span class="kpi-sub">Immutable Ledger</span>
       </div>
     </section>
 
-    <nav class="tabs">
+    <nav class="studio-tabs">
       <button
-        :class="['tab-btn', { active: activeTab === 'review' }]"
-        @click="activeTab = 'review'"
+        :class="['tab-btn', { active: activeTab === 'studio' }]"
+        @click="activeTab = 'studio'"
       >
-        合同审查与 Redline 对比
+        Split-Pane Redline &amp; Obligations
+      </button>
+      <button
+        :class="['tab-btn', { active: activeTab === 'diff' }]"
+        @click="activeTab = 'diff'"
+      >
+        Version Diff Comparison
       </button>
       <button
         :class="['tab-btn', { active: activeTab === 'ontology' }]"
         @click="activeTab = 'ontology'"
       >
-        法规本体图谱
+        Regulatory Ontology
       </button>
       <button
         :class="['tab-btn', { active: activeTab === 'wiki' }]"
         @click="activeTab = 'wiki'"
       >
-        法规 LLM Wiki 与巡检
+        Compliance Wiki &amp; Lint
       </button>
       <button
         :class="['tab-btn', { active: activeTab === 'hitl' }]"
         @click="activeTab = 'hitl'"
       >
-        法务总监 HITL 审批与审计
+        GC HITL &amp; Audit
         <span v-if="pendingActions.length" class="tab-count">{{ pendingActions.length }}</span>
       </button>
     </nav>
 
-    <!-- Tab 1: Contract Review & Redline Diff -->
-    <main v-if="activeTab === 'review'" class="panel-grid">
-      <section class="card">
-        <h2>1. FDE 合同审查流水线 (PII 脱敏 + 风险分类 + Redline)</h2>
-        <div class="form-row">
-          <label>
-            合同 ID
-            <input v-model="reviewForm.contract_id" type="text" />
-          </label>
-          <label>
-            合同标题
-            <input v-model="reviewForm.title" type="text" />
-          </label>
-        </div>
-        <div class="form-row">
-          <label>
-            相对方
-            <input v-model="reviewForm.counterparty" type="text" />
-          </label>
-          <label>
-            管辖法域
-            <input v-model="reviewForm.jurisdiction" type="text" />
-          </label>
-          <label>
-            责任上限 (USD)
-            <input v-model.number="reviewForm.liability_cap_usd" type="number" />
-          </label>
-        </div>
-        <label class="full-width">
-          合同文本
-          <textarea v-model="reviewForm.text" rows="6"></textarea>
-        </label>
-        <div class="actions-row">
+    <!-- TAB 1: SPLIT-PANE REDLINE & OBLIGATION STUDIO -->
+    <main v-if="activeTab === 'studio'" class="studio-container">
+      <section class="intake-bar card">
+        <div class="intake-head">
+          <div>
+            <span class="section-eyebrow">MATTER INTAKE &amp; EXTRACTION</span>
+            <h2>Contract Redline &amp; Obligation Calendar Analysis</h2>
+          </div>
           <button class="btn btn-primary" :disabled="loading" @click="submitContractReview">
-            执行智能审查
+            {{ loading ? "Analyzing..." : "Analyze & Redline" }}
           </button>
         </div>
 
-        <div v-if="reviewResult" class="result-box">
-          <div class="result-header">
-            <span :class="riskBadgeClass(reviewResult.overall_risk_level)">
-              综合风险: {{ reviewResult.overall_risk_level.toUpperCase() }} ({{ reviewResult.overall_risk_score }})
-            </span>
-            <span class="meta-chip">PII 脱敏: {{ reviewResult.pii_masked_count }} 处</span>
-            <span class="meta-chip">
-              HITL 状态: {{ reviewResult.requires_hitl ? "需法务总监审批" : "自动通过" }}
-            </span>
+        <div class="form-row">
+          <label>
+            Matter / Contract ID
+            <input v-model="reviewForm.contract_id" type="text" />
+          </label>
+          <label>
+            Agreement Title
+            <input v-model="reviewForm.title" type="text" />
+          </label>
+          <label>
+            Counterparty
+            <input v-model="reviewForm.counterparty" type="text" />
+          </label>
+          <label>
+            Jurisdiction
+            <input v-model="reviewForm.jurisdiction" type="text" />
+          </label>
+          <label>
+            Effective Date
+            <input v-model="reviewForm.effective_date" type="date" />
+          </label>
+          <label>
+            Liability Cap (USD)
+            <input v-model.number="reviewForm.liability_cap_usd" type="number" />
+          </label>
+        </div>
+
+        <label class="full-width">
+          Agreement Draft Text (PII auto-redacted prior to analysis)
+          <textarea v-model="reviewForm.text" rows="5"></textarea>
+        </label>
+
+        <div v-if="reviewResult" class="intake-summary">
+          <span :class="riskBadgeClass(reviewResult.overall_risk_level)">
+            Overall Risk: {{ reviewResult.overall_risk_level.toUpperCase() }} ({{ reviewResult.overall_risk_score }})
+          </span>
+          <span class="meta-chip">PII Masked: {{ reviewResult.pii_masked_count }}</span>
+          <span class="meta-chip">
+            GC Escalation: {{ reviewResult.requires_hitl ? "Required" : "Not Required" }}
+          </span>
+          <span v-if="obligationTimeline" class="meta-chip">
+            Obligations Extracted: {{ obligationTimeline.total_obligations }}
+          </span>
+        </div>
+      </section>
+
+      <!-- SPLIT PANE WORKSPACE -->
+      <div class="split-workspace">
+        <ClauseNavigator
+          :clauses="activeClauses"
+          :obligations="obligationTimeline?.obligations ?? []"
+          :selected-clause-id="selectedClause?.id ?? null"
+          :decisions="clauseDecisions"
+          @select-clause="(id) => (selectedClauseId = id)"
+        />
+
+        <RedlineDiffViewer
+          :clause="selectedClause"
+          :playbook-entry="matchingPlaybookEntry"
+          :diff-item="null"
+          :decision="selectedClause ? (clauseDecisions[selectedClause.id] ?? 'pending') : 'pending'"
+          :obligations="obligationTimeline?.obligations ?? []"
+          @accept-redline="handleAcceptRedline"
+          @reject-redline="handleRejectRedline"
+        />
+      </div>
+
+      <!-- OBLIGATION CALENDAR TIMELINE -->
+      <section class="card">
+        <div class="section-head">
+          <div>
+            <span class="section-eyebrow">POST-EXECUTION COMPLIANCE</span>
+            <h2>Obligation &amp; Renewal Calendar</h2>
           </div>
-          <div class="masked-preview">
-            <strong>脱敏后文本:</strong>
-            <pre>{{ reviewResult.masked_text }}</pre>
-          </div>
-          <div class="clause-list">
-            <div v-for="cl in reviewResult.clauses" :key="cl.id" class="clause-item">
-              <div class="clause-top">
-                <strong>{{ cl.title }}</strong>
-                <span :class="riskBadgeClass(cl.risk_level)">{{ cl.risk_level }} ({{ cl.risk_score }})</span>
-              </div>
-              <p class="clause-type">类型: {{ cl.clause_type }} · 关联法规: {{ cl.matched_regulations.join(", ") || "无" }}</p>
-              <p v-if="cl.redline_suggestion" class="redline-box">{{ cl.redline_suggestion }}</p>
+          <span v-if="obligationTimeline" class="meta-chip">
+            Effective Date: {{ obligationTimeline.effective_date }} · {{ obligationTimeline.total_obligations }} Deadlines
+          </span>
+        </div>
+
+        <div v-if="!obligationTimeline || obligationTimeline.obligations.length === 0" class="empty-state">
+          Run <strong>Analyze &amp; Redline</strong> to extract SLA, breach notification, notice, and renewal deadlines.
+        </div>
+
+        <div v-else class="timeline-grid">
+          <div
+            v-for="obl in obligationTimeline.obligations"
+            :key="obl.id"
+            class="timeline-card"
+          >
+            <div class="timeline-top">
+              <span class="deadline-pill">{{ obl.deadline_label }}</span>
+              <span :class="riskBadgeClass(obl.severity)">{{ obl.severity }}</span>
+            </div>
+            <h4>{{ obl.clause_title }}</h4>
+            <p class="timeline-summary">{{ obl.summary }}</p>
+            <div class="timeline-foot">
+              <span>Category: <strong>{{ obl.category.replace("_", " ") }}</strong></span>
+              <span>Party: <strong>{{ obl.party }}</strong></span>
+              <span>Due: <strong>{{ obl.due_date_iso ?? "Ongoing" }}</strong></span>
             </div>
           </div>
         </div>
       </section>
+    </main>
 
+    <!-- TAB 2: VERSION DIFF -->
+    <main v-if="activeTab === 'diff'" class="panel-grid">
       <section class="card">
-        <h2>2. 合同版本 Redline 对比 (Clause Risk Delta)</h2>
+        <span class="section-eyebrow">COUNTERPARTY MARKUP COMPARISON</span>
+        <h2>Contract Version Redline Diff (v1 vs v2)</h2>
         <div class="form-row">
           <label>
-            对比 ID
+            Comparison ID
             <input v-model="diffForm.contract_id" type="text" />
           </label>
           <label>
-            对比标题
+            Comparison Title
             <input v-model="diffForm.title" type="text" />
           </label>
         </div>
         <div class="form-row">
           <label>
-            原始版本 (v1)
+            Original Draft (v1)
             <textarea v-model="diffForm.original_text" rows="6"></textarea>
           </label>
           <label>
-            修订版本 (v2)
+            Revised Markup (v2)
             <textarea v-model="diffForm.revised_text" rows="6"></textarea>
           </label>
         </div>
         <div class="actions-row">
           <button class="btn btn-primary" :disabled="loading" @click="submitRedlineDiff">
-            计算风险 Delta 与 Redline 建议
+            Compute Risk Delta &amp; Diff
           </button>
         </div>
 
@@ -426,27 +549,41 @@ onMounted(() => {
           <div v-for="cd in diffResult.clause_diffs" :key="cd.index" class="clause-item">
             <div class="clause-top">
               <strong>#{{ cd.index }} {{ cd.title }} [{{ cd.status }}]</strong>
-              <span class="meta-chip">风险变化: {{ cd.risk_delta > 0 ? "+" : "" }}{{ cd.risk_delta }}</span>
+              <span class="meta-chip">Risk Delta: {{ cd.risk_delta > 0 ? "+" : "" }}{{ cd.risk_delta }}</span>
             </div>
             <p v-if="cd.redline_recommendation" class="redline-box">{{ cd.redline_recommendation }}</p>
             <pre v-if="cd.diff_lines.length" class="diff-pre">{{ cd.diff_lines.join("\n") }}</pre>
           </div>
         </div>
       </section>
+
+      <section class="card">
+        <span class="section-eyebrow">FIRM STANDARD LIBRARY</span>
+        <h2>Redline Playbook Positions ({{ playbookEntries.length }})</h2>
+        <div v-for="entry in playbookEntries" :key="entry.id" class="clause-item">
+          <div class="clause-top">
+            <strong>{{ entry.title }}</strong>
+            <span class="meta-chip">{{ entry.clause_type }}</span>
+          </div>
+          <p class="muted"><strong>Trigger:</strong> {{ entry.risk_trigger }}</p>
+          <p class="playbook-pos"><strong>Standard:</strong> {{ entry.standard_position }}</p>
+          <p class="playbook-pos"><strong>Fallback:</strong> {{ entry.fallback_position }}</p>
+        </div>
+      </section>
     </main>
 
-    <!-- Tab 2: Legal Ontology Graph -->
+    <!-- TAB 3: ONTOLOGY -->
     <main v-if="activeTab === 'ontology'" class="panel-grid">
       <section class="card">
-        <h2>法规本体库 ({{ regulations.length }})</h2>
+        <h2>Regulatory Ontology Registry ({{ regulations.length }})</h2>
         <table class="data-table">
           <thead>
             <tr>
-              <th>法规代码</th>
-              <th>名称</th>
-              <th>法域</th>
-              <th>状态</th>
-              <th>关键词</th>
+              <th>Code</th>
+              <th>Title</th>
+              <th>Jurisdiction</th>
+              <th>Status</th>
+              <th>Keywords</th>
             </tr>
           </thead>
           <tbody>
@@ -467,9 +604,9 @@ onMounted(() => {
 
       <section class="card">
         <div class="section-head">
-          <h2>条款本体与风险映射 ({{ filteredClauses.length }})</h2>
+          <h2>Clause Risk &amp; Regulation Mapping ({{ filteredClauses.length }})</h2>
           <select v-model="riskFilter">
-            <option value="">全部风险等级</option>
+            <option value="">All Risk Levels</option>
             <option value="critical">critical</option>
             <option value="high">high</option>
             <option value="medium">medium</option>
@@ -477,15 +614,15 @@ onMounted(() => {
           </select>
         </div>
         <div v-if="filteredClauses.length === 0" class="empty-state">
-          暂无已注册条款，请先在「合同审查」或「Wiki 入库」提交合同。
+          No clauses registered yet. Analyze a contract in the Studio tab.
         </div>
         <table v-else class="data-table">
           <thead>
             <tr>
-              <th>条款 ID</th>
-              <th>类型</th>
-              <th>风险</th>
-              <th>匹配法规</th>
+              <th>Clause ID</th>
+              <th>Type</th>
+              <th>Risk</th>
+              <th>Mapped Regulations</th>
             </tr>
           </thead>
           <tbody>
@@ -498,7 +635,7 @@ onMounted(() => {
           </tbody>
         </table>
 
-        <h3 class="sub-heading">本体关系边 ({{ ontologyLinks.length }})</h3>
+        <h3 class="sub-heading">Knowledge Graph Edges ({{ ontologyLinks.length }})</h3>
         <div class="link-pills">
           <span v-for="lnk in ontologyLinks.slice(0, 20)" :key="lnk.id" class="meta-chip">
             {{ lnk.source_id }} —[{{ lnk.relation }}]→ {{ lnk.target_id }}
@@ -507,17 +644,17 @@ onMounted(() => {
       </section>
     </main>
 
-    <!-- Tab 3: LLM Wiki & Lint -->
+    <!-- TAB 4: WIKI & LINT -->
     <main v-if="activeTab === 'wiki'" class="panel-grid">
       <section class="card">
-        <h2>法规 / 合同 Markdown Wiki 入库</h2>
+        <h2>Compliance Markdown Wiki Ingest &amp; Lint</h2>
         <div class="form-row">
           <label>
-            文档 ID
+            Document ID
             <input v-model="wikiIngestForm.doc_id" type="text" />
           </label>
           <label>
-            类型
+            Document Type
             <select v-model="wikiIngestForm.doc_type">
               <option value="regulation">regulation</option>
               <option value="contract">contract</option>
@@ -526,36 +663,36 @@ onMounted(() => {
           </label>
         </div>
         <label class="full-width">
-          标题
+          Title
           <input v-model="wikiIngestForm.title" type="text" />
         </label>
         <label class="full-width">
-          正文内容
+          Content
           <textarea v-model="wikiIngestForm.content" rows="4"></textarea>
         </label>
         <div class="actions-row">
           <button class="btn btn-primary" :disabled="loading" @click="submitWikiIngest">
-            写入 Wiki 知识库
+            Ingest to Wiki
           </button>
           <button class="btn btn-secondary" :disabled="loading" @click="runWikiLint">
-            执行 Wiki 合规巡检 (Lint)
+            Run Compliance Lint
           </button>
         </div>
         <p v-if="wikiIngestMessage" class="success-msg">{{ wikiIngestMessage }}</p>
 
         <div v-if="lintReport" class="result-box">
-          <h3>巡检报告 · 发现问题总数: {{ lintReport.total_issues }}</h3>
+          <h3>Lint Report · Total Issues: {{ lintReport.total_issues }}</h3>
           <ul>
-            <li>引用已废止法规: {{ lintReport.superseded_regulations.length }}</li>
-            <li>未关联法规孤立条款: {{ lintReport.unlinked_clauses.length }}</li>
-            <li>责任上限冲突: {{ lintReport.conflicting_liability_caps.length }}</li>
+            <li>Superseded Regulations: {{ lintReport.superseded_regulations.length }}</li>
+            <li>Unlinked Clauses: {{ lintReport.unlinked_clauses.length }}</li>
+            <li>Conflicting Liability Caps: {{ lintReport.conflicting_liability_caps.length }}</li>
           </ul>
           <pre v-if="lintReport.total_issues > 0" class="diff-pre">{{ JSON.stringify(lintReport, null, 2) }}</pre>
         </div>
       </section>
 
       <section class="card">
-        <h2>Wiki 知识库页面列表 ({{ wikiPages.length }})</h2>
+        <h2>Wiki Knowledge Pages ({{ wikiPages.length }})</h2>
         <div class="wiki-list">
           <div v-for="page in wikiPages" :key="page.id" class="wiki-card">
             <div class="clause-top">
@@ -568,50 +705,50 @@ onMounted(() => {
       </section>
     </main>
 
-    <!-- Tab 4: HITL Approval & Audit -->
+    <!-- TAB 5: HITL & AUDIT -->
     <main v-if="activeTab === 'hitl'" class="panel-grid">
       <section class="card">
-        <h2>法务总监 HITL 待审批队列 ({{ pendingActions.length }})</h2>
+        <h2>General Counsel HITL Approval Queue ({{ pendingActions.length }})</h2>
         <div class="form-row">
           <label>
-            审批人 (General Counsel)
+            Approver (General Counsel)
             <input v-model="hitlApprover" type="text" />
           </label>
           <label>
-            审批意见备注
+            Decision Notes
             <input v-model="hitlNotes" type="text" />
           </label>
         </div>
         <div v-if="pendingActions.length === 0" class="empty-state">
-          当前无待审批的高风险条款。
+          No pending high-risk clauses awaiting General Counsel sign-off.
         </div>
         <div v-for="act in pendingActions" :key="act.id" class="clause-item">
           <div class="clause-top">
-            <strong>{{ act.id }} · 合同 {{ act.contract_id }}</strong>
+            <strong>{{ act.id }} · Matter {{ act.contract_id }}</strong>
             <span :class="riskBadgeClass(act.risk_level)">{{ act.risk_level }}</span>
           </div>
-          <p class="muted">条款: {{ act.clause_id || "-" }} · 发起人: {{ act.requested_by }}</p>
+          <p class="muted">Clause: {{ act.clause_id || "-" }} · Requested by: {{ act.requested_by }}</p>
           <div class="actions-row">
             <button class="btn btn-primary" :disabled="loading" @click="decideAction(act.id, 'approved')">
-              批准例外 (Approve)
+              Approve Exception
             </button>
             <button class="btn btn-danger" :disabled="loading" @click="decideAction(act.id, 'rejected')">
-              驳回并要求 Redline (Reject)
+              Reject &amp; Require Redline
             </button>
           </div>
         </div>
       </section>
 
       <section class="card">
-        <h2>合规审计日志 ({{ auditLogs.length }})</h2>
-        <div v-if="auditLogs.length === 0" class="empty-state">暂无审计记录。</div>
+        <h2>Immutable Compliance Audit Log ({{ auditLogs.length }})</h2>
+        <div v-if="auditLogs.length === 0" class="empty-state">No audit events recorded yet.</div>
         <table v-else class="data-table">
           <thead>
             <tr>
-              <th>时间</th>
-              <th>事件类型</th>
-              <th>操作人</th>
-              <th>目标对象</th>
+              <th>Timestamp</th>
+              <th>Event</th>
+              <th>Actor</th>
+              <th>Target</th>
             </tr>
           </thead>
           <tbody>
@@ -629,60 +766,70 @@ onMounted(() => {
 </template>
 
 <style scoped>
-:root {
-  color-scheme: dark;
-}
-
-.shell {
+.law-shell {
   min-height: 100vh;
-  background: #0b1120;
-  color: #e2e8f0;
+  background: #faf8f5;
+  color: #1e293b;
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  padding: 20px 28px 40px;
+  padding: 20px 28px 48px;
 }
 
-.topbar {
+.masthead {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 2px solid #1e293b;
   padding-bottom: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
   gap: 16px;
   flex-wrap: wrap;
 }
 
-.brand {
+.brand-lockup {
   display: flex;
   align-items: center;
   gap: 14px;
 }
 
-.brand-badge {
-  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-  color: #fff;
+.firm-seal {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  background: #991b1b;
+  color: #faf8f5;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 24px;
   font-weight: 700;
-  font-size: 16px;
-  padding: 10px 14px;
-  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.brand h1 {
-  margin: 0;
-  font-size: 20px;
-  color: #f8fafc;
+.firm-kicker {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #991b1b;
+}
+
+.masthead h1 {
+  margin: 2px 0 0;
+  font-size: 22px;
+  font-family: Georgia, "Times New Roman", serif;
+  color: #1e293b;
 }
 
 .subtitle {
-  margin: 2px 0 0;
+  margin: 3px 0 0;
   font-size: 12px;
-  color: #94a3b8;
+  color: #475569;
 }
 
-.topbar-actions {
+.masthead-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .status-pill {
@@ -693,59 +840,64 @@ onMounted(() => {
 }
 
 .status-pill.online {
-  background: rgba(16, 185, 129, 0.15);
-  color: #34d399;
-  border: 1px solid rgba(52, 211, 153, 0.35);
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
 }
 
 .status-pill.offline {
-  background: rgba(239, 68, 68, 0.15);
-  color: #f87171;
-  border: 1px solid rgba(248, 113, 113, 0.35);
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
 }
 
 .error-banner {
-  background: rgba(239, 68, 68, 0.15);
-  border: 1px solid #ef4444;
-  color: #fecaca;
+  background: #fef2f2;
+  border: 1px solid #991b1b;
+  color: #7f1d1d;
   padding: 10px 14px;
   border-radius: 8px;
   margin-bottom: 16px;
+  font-size: 13px;
 }
 
-.kpi-grid {
+.kpi-ribbon {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
   gap: 12px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .kpi-card {
-  background: #111827;
-  border: 1px solid #1e293b;
-  border-radius: 10px;
-  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #e2ddd2;
+  border-radius: 8px;
+  padding: 12px 14px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .kpi-label {
-  font-size: 12px;
-  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
 }
 
 .kpi-value {
   font-size: 24px;
-  color: #f8fafc;
+  font-family: Georgia, "Times New Roman", serif;
+  color: #1e293b;
 }
 
-.kpi-value.warn {
-  color: #f87171;
+.kpi-value.burgundy {
+  color: #991b1b;
 }
 
-.kpi-value.accent {
-  color: #fbbf24;
+.kpi-value.amber {
+  color: #b45309;
 }
 
 .kpi-sub {
@@ -753,7 +905,7 @@ onMounted(() => {
   color: #64748b;
 }
 
-.tabs {
+.studio-tabs {
   display: flex;
   gap: 8px;
   margin-bottom: 18px;
@@ -761,32 +913,51 @@ onMounted(() => {
 }
 
 .tab-btn {
-  background: #111827;
-  color: #cbd5e1;
-  border: 1px solid #1e293b;
-  padding: 10px 16px;
-  border-radius: 8px;
+  background: #f5f2eb;
+  color: #1e293b;
+  border: 1px solid #d6cfc2;
+  padding: 9px 15px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
 
 .tab-btn.active {
-  background: #1d4ed8;
-  color: #ffffff;
-  border-color: #3b82f6;
+  background: #1e293b;
+  color: #faf8f5;
+  border-color: #1e293b;
 }
 
 .tab-count {
-  background: #ef4444;
-  color: #fff;
+  background: #991b1b;
+  color: #ffffff;
   border-radius: 999px;
   padding: 1px 7px;
   font-size: 11px;
   font-weight: 700;
+}
+
+.studio-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.split-workspace {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 18px;
+  align-items: stretch;
+}
+
+@media (max-width: 960px) {
+  .split-workspace {
+    grid-template-columns: 1fr;
+  }
 }
 
 .panel-grid {
@@ -796,22 +967,105 @@ onMounted(() => {
 }
 
 .card {
-  background: #111827;
-  border: 1px solid #1e293b;
-  border-radius: 12px;
-  padding: 18px;
+  background: #ffffff;
+  border: 1px solid #e2ddd2;
+  border-radius: 10px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(30, 41, 59, 0.04);
+}
+
+.section-eyebrow {
+  display: block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #991b1b;
+  margin-bottom: 2px;
 }
 
 .card h2 {
-  margin: 0 0 14px;
-  font-size: 16px;
-  color: #f1f5f9;
+  margin: 0 0 12px;
+  font-size: 17px;
+  font-family: Georgia, "Times New Roman", serif;
+  color: #1e293b;
+}
+
+.intake-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.intake-head h2 {
+  margin: 0;
+}
+
+.intake-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #ece7dc;
+}
+
+.timeline-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.timeline-card {
+  background: #faf8f5;
+  border: 1px solid #e2ddd2;
+  border-left: 4px solid #991b1b;
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.timeline-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.deadline-pill {
+  font-size: 12px;
+  font-weight: 700;
+  color: #991b1b;
+}
+
+.timeline-card h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #1e293b;
+}
+
+.timeline-summary {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.timeline-foot {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: #64748b;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .sub-heading {
   margin: 18px 0 10px;
   font-size: 14px;
-  color: #cbd5e1;
+  color: #1e293b;
 }
 
 .section-head {
@@ -819,6 +1073,8 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 12px;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .form-row {
@@ -833,7 +1089,8 @@ label {
   flex-direction: column;
   gap: 5px;
   font-size: 12px;
-  color: #94a3b8;
+  font-weight: 600;
+  color: #475569;
 }
 
 .full-width {
@@ -843,13 +1100,20 @@ label {
 input,
 textarea,
 select {
-  background: #0f172a;
-  color: #f8fafc;
-  border: 1px solid #334155;
+  background: #faf8f5;
+  color: #1e293b;
+  border: 1px solid #d6cfc2;
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 13px;
   font-family: inherit;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid rgba(153, 27, 27, 0.25);
+  border-color: #991b1b;
 }
 
 .actions-row {
@@ -862,7 +1126,7 @@ select {
 .btn {
   border: none;
   border-radius: 6px;
-  padding: 8px 14px;
+  padding: 9px 16px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
@@ -874,24 +1138,28 @@ select {
 }
 
 .btn-primary {
-  background: #2563eb;
-  color: #fff;
+  background: #991b1b;
+  color: #ffffff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #7f1d1d;
 }
 
 .btn-secondary {
-  background: #1e293b;
-  color: #e2e8f0;
-  border: 1px solid #334155;
+  background: #f5f2eb;
+  color: #1e293b;
+  border: 1px solid #d6cfc2;
 }
 
 .btn-danger {
-  background: #dc2626;
-  color: #fff;
+  background: #1e293b;
+  color: #ffffff;
 }
 
 .result-box {
   margin-top: 14px;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid #e2ddd2;
   padding-top: 12px;
 }
 
@@ -912,53 +1180,54 @@ select {
 }
 
 .badge-critical {
-  background: rgba(220, 38, 38, 0.25);
-  color: #fca5a5;
-  border: 1px solid #dc2626;
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid #fca5a5;
 }
 
 .badge-high {
-  background: rgba(249, 115, 22, 0.2);
-  color: #fdba74;
-  border: 1px solid #f97316;
+  background: #ffedd5;
+  color: #9a3412;
+  border: 1px solid #fdba74;
 }
 
 .badge-medium {
-  background: rgba(234, 179, 8, 0.2);
-  color: #fde047;
-  border: 1px solid #eab308;
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fcd34d;
 }
 
 .badge-low {
-  background: rgba(16, 185, 129, 0.2);
-  color: #6ee7b7;
-  border: 1px solid #10b981;
+  background: #dcfce7;
+  color: #166534;
+  border: 1px solid #86efac;
 }
 
 .meta-chip {
-  background: #1e293b;
-  color: #cbd5e1;
+  background: #f5f2eb;
+  color: #1e293b;
+  border: 1px solid #e2ddd2;
   font-size: 11px;
+  font-weight: 600;
   padding: 3px 8px;
   border-radius: 6px;
 }
 
-.masked-preview pre,
 .diff-pre {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: #faf8f5;
+  border: 1px solid #e2ddd2;
   border-radius: 6px;
   padding: 10px;
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #cbd5e1;
+  color: #1e293b;
 }
 
 .clause-item,
 .wiki-card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: #faf8f5;
+  border: 1px solid #e2ddd2;
   border-radius: 8px;
   padding: 10px 12px;
   margin-top: 8px;
@@ -971,19 +1240,20 @@ select {
   gap: 8px;
 }
 
-.clause-type {
-  margin: 4px 0;
-  font-size: 12px;
-  color: #94a3b8;
-}
-
 .redline-box {
   margin: 6px 0 0;
   padding: 6px 8px;
-  background: rgba(245, 158, 11, 0.12);
-  border-left: 3px solid #f59e0b;
+  background: #fef2f2;
+  border-left: 3px solid #991b1b;
   font-size: 12px;
-  color: #fde68a;
+  color: #7f1d1d;
+}
+
+.playbook-pos {
+  margin: 4px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #1e293b;
 }
 
 .data-table {
@@ -996,16 +1266,16 @@ select {
 .data-table td {
   text-align: left;
   padding: 8px 6px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid #e7e2d8;
 }
 
 .data-table th {
-  color: #94a3b8;
-  font-weight: 600;
+  color: #475569;
+  font-weight: 700;
 }
 
 .muted {
-  color: #94a3b8;
+  color: #64748b;
   font-size: 12px;
 }
 
@@ -1017,8 +1287,9 @@ select {
 }
 
 .success-msg {
-  color: #34d399;
+  color: #166534;
   font-size: 13px;
+  font-weight: 600;
   margin-top: 8px;
 }
 

@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.fde_pipeline import ManufacturingFDEPipeline
 from app.llm_wiki import WIKI_LINK_RE, ManufacturingLLMWiki
 from app.ontology import ActionStatus, ManufacturingOntologyRegistry
+from app.telemetry_stream import TelemetryRingBuffer, WorkOrderStateMachine
 
 
 class WikiIngestRequest(BaseModel):
@@ -55,6 +56,35 @@ class PredictiveMaintenanceRequest(BaseModel):
     samples: list[TelemetrySample] = Field(default_factory=list)
 
 
+class TelemetryStreamSample(BaseModel):
+    equipment_id: str
+    readings: dict[str, float] = Field(default_factory=dict)
+    timestamp: str | None = None
+
+
+class TelemetryIngestBatchRequest(BaseModel):
+    samples: list[TelemetryStreamSample] = Field(default_factory=list)
+
+
+class WorkOrderCreateRequest(BaseModel):
+    equipment_id: str
+    title: str
+    fault_code: str | None = None
+    sop_id: str | None = None
+    priority: str = "HIGH"
+    actor: str = "scada-operator"
+    notes: str = ""
+
+
+class WorkOrderTransitionRequest(BaseModel):
+    work_order_id: str
+    target_status: str
+    actor: str = "scada-operator"
+    assigned_to: str | None = None
+    loto_tag_id: str | None = None
+    notes: str = ""
+
+
 def create_app(
     wiki_dir: str | Path | None = None,
     registry: ManufacturingOntologyRegistry | None = None,
@@ -72,6 +102,8 @@ def create_app(
         wiki=wiki,
         sync_wiki_on_init=True,
     )
+    telemetry_buffer = TelemetryRingBuffer(window_size=30, z_threshold=2.5, min_samples=5)
+    work_order_sm = WorkOrderStateMachine(seed_defaults=True)
 
     metrics_state: dict[str, int] = {
         "requests_total": 0,
@@ -81,12 +113,15 @@ def create_app(
         "incidents_total": 0,
         "hitl_approvals_total": 0,
         "hitl_rejections_total": 0,
+        "telemetry_batches_total": 0,
+        "telemetry_anomalies_total": 0,
+        "workorder_transitions_total": 0,
     }
 
     app = FastAPI(
         title="P04 Smart Manufacturing & Equipment Ops Agent",
-        version="1.1.0",
-        description="Offline deterministic Manufacturing Ontology + LLM Wiki + HITL FDE Pipeline.",
+        version="1.2.0",
+        description="Offline deterministic Manufacturing Ontology + IIoT SCADA Telemetry + LOTO Work-Order + HITL FDE Pipeline.",
     )
     app.add_middleware(
         CORSMiddleware,
@@ -97,6 +132,8 @@ def create_app(
     app.state.registry = ont_registry
     app.state.wiki = wiki
     app.state.pipeline = pipeline
+    app.state.telemetry_buffer = telemetry_buffer
+    app.state.work_order_sm = work_order_sm
     app.state.metrics = metrics_state
 
     @app.middleware("http")
@@ -237,6 +274,8 @@ def create_app(
             "fault_codes": [fc.model_dump() for fc in ont_registry.fault_codes.values()],
             "sops": [sop.model_dump() for sop in ont_registry.sops.values()],
             "links": [lnk.model_dump() for lnk in ont_registry.links],
+            "work_orders": [wo.model_dump() for wo in work_order_sm.list_work_orders()],
+            "telemetry_snapshots": telemetry_buffer.get_all_snapshots(),
         }
 
     @app.get("/api/v1/wiki/pages")
@@ -289,6 +328,96 @@ def create_app(
             return pipeline.generate_predictive_maintenance(samples=samples)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/v1/telemetry/ingest-batch")
+    def telemetry_ingest_batch(payload: TelemetryIngestBatchRequest) -> dict[str, Any]:
+        for sample in payload.samples:
+            if ont_registry.get_equipment(sample.equipment_id) is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown equipment_id: {sample.equipment_id}",
+                )
+        metrics_state["telemetry_batches_total"] += 1
+        result = telemetry_buffer.ingest_batch([s.model_dump() for s in payload.samples])
+        if result["anomaly_count"] > 0:
+            metrics_state["telemetry_anomalies_total"] += int(result["anomaly_count"])
+            for anomaly in result["anomalies"]:
+                pipeline._record_audit(
+                    event_type="TELEMETRY_ZSCORE_ANOMALY",
+                    equipment_id=anomaly["equipment_id"],
+                    actor="telemetry-ring-buffer",
+                    detail=anomaly,
+                )
+        return result
+
+    @app.get("/api/v1/telemetry/snapshots")
+    def telemetry_snapshots() -> dict[str, Any]:
+        return {
+            "snapshots": telemetry_buffer.get_all_snapshots(),
+            "recent_anomalies": telemetry_buffer.get_recent_anomalies(),
+        }
+
+    @app.get("/api/v1/workorders")
+    def list_workorders() -> dict[str, Any]:
+        orders = [wo.model_dump() for wo in work_order_sm.list_work_orders()]
+        return {"work_orders": orders, "total": len(orders)}
+
+    @app.post("/api/v1/workorders")
+    def create_workorder(payload: WorkOrderCreateRequest) -> dict[str, Any]:
+        if ont_registry.get_equipment(payload.equipment_id) is None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Unknown equipment_id: {payload.equipment_id}",
+            )
+        wo = work_order_sm.create_work_order(
+            equipment_id=payload.equipment_id,
+            title=payload.title,
+            fault_code=payload.fault_code,
+            sop_id=payload.sop_id,
+            priority=payload.priority,
+            actor=payload.actor,
+            notes=payload.notes,
+        )
+        pipeline._record_audit(
+            event_type="WORK_ORDER_CREATED",
+            equipment_id=wo.equipment_id,
+            actor=payload.actor,
+            detail={"work_order_id": wo.work_order_id, "title": wo.title},
+        )
+        return {"work_order": wo.model_dump()}
+
+    @app.post("/api/v1/workorders/transition")
+    def transition_workorder(payload: WorkOrderTransitionRequest) -> dict[str, Any]:
+        try:
+            wo = work_order_sm.transition(
+                work_order_id=payload.work_order_id,
+                target_status=payload.target_status,
+                actor=payload.actor,
+                assigned_to=payload.assigned_to,
+                loto_tag_id=payload.loto_tag_id,
+                notes=payload.notes,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+        metrics_state["workorder_transitions_total"] += 1
+        pipeline._record_audit(
+            event_type="WORK_ORDER_TRANSITION",
+            equipment_id=wo.equipment_id,
+            actor=payload.actor,
+            detail={
+                "work_order_id": wo.work_order_id,
+                "status": wo.status.value,
+                "loto_tag_id": wo.loto_tag_id,
+                "assigned_to": wo.assigned_to,
+            },
+        )
+        return {
+            "work_order": wo.model_dump(),
+            "audit_trail_count": len(pipeline.audit_trail),
+        }
 
     return app
 
