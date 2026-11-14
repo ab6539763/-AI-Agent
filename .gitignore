@@ -7,3 +7,8 @@ __pycache__/
 .env
 *.log
 .DS_Store
+
+# Node / Vue 3
+node_modules/
+dist/
+
